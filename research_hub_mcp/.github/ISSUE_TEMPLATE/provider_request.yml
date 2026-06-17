@@ -1,0 +1,149 @@
+name: 🔍 New Academic Provider Request
+description: Request support for a new academic paper source
+title: "[Provider]: Add support for "
+labels: ["provider", "enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a new academic provider! Please provide details about the source you'd like to see supported.
+
+  - type: input
+    id: provider-name
+    attributes:
+      label: "Provider Name"
+      description: "Name of the academic source/database"
+      placeholder: "e.g., IEEE Xplore, ACM Digital Library, SpringerLink"
+    validations:
+      required: true
+
+  - type: input
+    id: provider-url
+    attributes:
+      label: "Provider URL"
+      description: "Main website URL of the provider"
+      placeholder: "https://example.com"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: access-type
+    attributes:
+      label: "Access Type"
+      description: "How is this provider typically accessed?"
+      options:
+        - "Open Access - Freely available"
+        - "Subscription - Requires institutional access"
+        - "Freemium - Mix of free and paid content"
+        - "API Available - Has documented API"
+        - "Unknown"
+    validations:
+      required: true
+
+  - type: textarea
+    id: academic-focus
+    attributes:
+      label: "Academic Focus"
+      description: "What academic disciplines or types of content does this provider specialize in?"
+      placeholder: "Computer Science, Medicine, Physics, Conference papers, Journal articles, etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: coverage
+    attributes:
+      label: "Content Coverage"
+      description: "What kind of content and how much does this provider offer?"
+      placeholder: "Number of papers, date range, special collections, etc."
+
+  - type: textarea
+    id: search-capabilities
+    attributes:
+      label: "Search Capabilities"
+      description: "What search features does this provider support?"
+      placeholder: "Title search, author search, DOI lookup, keyword search, advanced filters, etc."
+
+  - type: input
+    id: api-documentation
+    attributes:
+      label: "API Documentation"
+      description: "Link to API documentation (if available)"
+      placeholder: "https://provider.com/api-docs"
+
+  - type: textarea
+    id: terms-of-service
+    attributes:
+      label: "Terms of Service Considerations"
+      description: "Any important terms of service or usage restrictions we should be aware of?"
+      placeholder: "Rate limits, usage restrictions, terms that affect automated access, etc."
+
+  - type: dropdown
+    id: priority-suggestion
+    attributes:
+      label: "Suggested Priority"
+      description: "What priority should this provider have relative to others?"
+      options:
+        - "High (90-100) - Primary source for specific domains"
+        - "Medium-High (80-89) - Important supplementary source"
+        - "Medium (70-79) - Good additional coverage"
+        - "Low-Medium (60-69) - Specialized use cases"
+        - "Low (50-59) - Fallback option"
+    validations:
+      required: true
+
+  - type: textarea
+    id: benefits
+    attributes:
+      label: "Benefits and Rationale"
+      description: "Why should this provider be added? What unique value does it provide?"
+      placeholder: "Unique content, better coverage for specific fields, higher quality metadata, etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation-notes
+    attributes:
+      label: "Implementation Notes"
+      description: "Any technical details that might be helpful for implementation"
+      placeholder: "Authentication requirements, response formats, known issues, etc."
+
+  - type: checkboxes
+    id: research-usage
+    attributes:
+      label: "Research Usage"
+      description: "How would you use this provider in your research?"
+      options:
+        - label: "Primary source for my field of research"
+        - label: "Important supplementary source"
+        - label: "Access to specific content types (conferences, journals, etc.)"
+        - label: "Better metadata quality"
+        - label: "Geographic or institutional coverage"
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: "Example Content"
+      description: "Provide examples of the type of content this provider offers (DOIs, paper titles, etc.)"
+      placeholder: "Example DOIs, paper titles, or search queries that demonstrate the provider's value"
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: "Contribution"
+      description: "Are you willing to help implement this provider?"
+      options:
+        - label: "I can help implement this provider"
+        - label: "I can help with testing and validation"
+        - label: "I have access to this provider for testing"
+        - label: "I can provide example queries and expected results"
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: "Legal and Ethical Use"
+      description: "Please confirm this provider request supports legitimate academic use"
+      options:
+        - label: "This provider request supports legitimate academic research use only"
+          required: true
+        - label: "I will respect the provider's terms of service and usage policies"
+          required: true

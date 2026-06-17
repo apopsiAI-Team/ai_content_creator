@@ -1,0 +1,68 @@
+services:
+  deploy-api-1:
+    container_name: deploy-api-1
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:-./deploy/env/backend.env}
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8001
+      RUST_RESEARCH_HUB_URL: http://research-hub:8091
+    depends_on:
+      research-hub:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app-internal
+      - shared-nginx
+
+  deploy-frontend-1:
+    container_name: deploy-frontend-1
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/e-learning}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/e-learning/}
+    restart: unless-stopped
+    depends_on:
+      deploy-api-1:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - shared-nginx
+
+  research-hub:
+    container_name: research-hub
+    build:
+      context: .
+      dockerfile: docker/research-hub.Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8091/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-internal
+
+networks:
+  app-internal:
+    driver: bridge
+  shared-nginx:
+    external: true
+    name: ${SHARED_NGINX_NETWORK:-frameworks_default}

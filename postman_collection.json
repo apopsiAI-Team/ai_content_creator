@@ -1,0 +1,432 @@
+{
+  "info": {
+    "name": "AI Material Creator v2",
+    "description": "API collection για τα backend services του AI Material Creator v2.\n\n**Base URL:** ορίζεται μέσω της env variable `baseUrl` (default `http://localhost:8001`).\n\n## Headers & body correlation fields\n\nΌλα τα requests στέλνουν:\n- **`X-Session-ID` header** (auto-generated ανά collection run, αναπαριστά **ποιος** καλεί — επηρεάζει τον rate limiter)\n- **`document_id` body field** (auto-generated, σταθερό για όλα τα calls του collection run, αναπαριστά **σε ποιο έγγραφο** δουλεύει — εμφανίζεται στα backend logs)\n\nΓια να αλλάξεις σε άλλο document, reset-άρε το `documentId` collection variable.\n\n## Modes\n- **Both** = δουλεύει σε Standard και ESCO\n- **ESCO only** = απαιτεί ESCO skills στο payload\n\n## Τυπική σειρά εκτέλεσης\n1. `#1` Health → ελέγχει αν το backend ζει\n2. `#4` Generate Standard ή `#5` Generate ESCO → παράγει υλικό\n3. `#6` Summary → περίληψη (αυτόματα διαβάζει το παραγόμενο content)\n4. `#8` Review (μόνο ESCO) → coverage analysis\n5. `#10` Revision → στοχευμένες αλλαγές στο παραγόμενο draft\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-generate sessionId once per collection run (stable across requests)",
+          "if (!pm.collectionVariables.get('sessionId')) {",
+          "  pm.collectionVariables.set('sessionId', pm.variables.replaceIn('{{$guid}}'));",
+          "}",
+          "// Auto-generate documentId once per collection run — προσομοιώνει 'ένα έγγραφο,",
+          "// πολλές κλήσεις'. Reset-άρε το για νέο έγγραφο.",
+          "if (!pm.collectionVariables.get('documentId')) {",
+          "  pm.collectionVariables.set('documentId', 'doc-' + pm.variables.replaceIn('{{$guid}}').slice(0, 8));",
+          "}",
+          "// JSON-escape το generatedContent ώστε να μπορεί να μπει ως value σε JSON body",
+          "// (το Postman δεν κάνει αυτόματα escape control characters όταν επεκτείνει variables).",
+          "// Bodies χρησιμοποιούν {{contentJson}} χωρίς εξωτερικά εισαγωγικά — το JSON.stringify",
+          "// τα προσθέτει ήδη.",
+          "const content = pm.collectionVariables.get('generatedContent') || '';",
+          "pm.collectionVariables.set('contentJson', JSON.stringify(content));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8001", "type": "string" },
+    { "key": "sessionId", "value": "", "type": "string", "description": "Auto-generated UUID per collection run — sent as X-Session-ID header. Stable per user-session (rate limiting key)." },
+    { "key": "documentId", "value": "", "type": "string", "description": "Auto-generated id per collection run — sent as document_id body field. Stable per editing-session of one document (logging/audit). Reset για νέο έγγραφο." },
+    { "key": "modelProvider", "value": "claude", "type": "string", "description": "claude | openai" },
+    { "key": "generatedContent", "value": "", "type": "string", "description": "Auto-populated από το /api/generate-stream — χρησιμοποιείται στο /api/generate-summary, /api/review και ως current_draft στο revision mode" },
+    { "key": "lastModuleTitle", "value": "", "type": "string", "description": "Auto-populated module title" },
+    { "key": "contentJson", "value": "\"\"", "type": "string", "description": "Auto-populated JSON.stringify(generatedContent) — JSON-escaped + quoted. Χρησιμοποιείται από bodies όπως {{contentJson}} (χωρίς εξωτερικά εισαγωγικά)." }
+  ],
+  "item": [
+    {
+      "name": "1. Health check  [Both]",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "health"]
+        },
+        "description": "Επιστρέφει την κατάσταση του backend (API key flags, model, Research Hub, ESCO data)."
+      }
+    },
+    {
+      "name": "2. Parse DOCX  [ESCO only]",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Server returns document_id — store it for subsequent calls so all logs",
+              "// of this document share the same correlation id.",
+              "try {",
+              "  const body = pm.response.json();",
+              "  if (body && body.document_id) {",
+              "    pm.collectionVariables.set('documentId', body.document_id);",
+              "    console.log('✓ document_id set from server:', body.document_id);",
+              "  }",
+              "  if (body && body.documentTitle) {",
+              "    console.log('✓ Parsed:', body.documentTitle, '—', (body.modules || []).length, 'modules');",
+              "  }",
+              "} catch (e) {",
+              "  console.warn('Could not parse parse-docx response:', e.message);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": [],
+              "description": "Επίλεξε ένα .docx εκπαιδευτικό σχέδιο (max 10 MB)"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/parse-docx",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "parse-docx"]
+        },
+        "description": "Parsing του educational design .docx → modules JSON. Multipart/form-data με field `file`.\n\n**Response shape:**\n```json\n{\n  \"documentTitle\": \"...\",\n  \"totalHours\": 120,\n  \"modules\": [\n    {\n      \"number\": 1,\n      \"title\": \"...\",\n      \"hours\": 14,\n      \"skills\": [\n        {\n          \"code\": \"http://data.europa.eu/esco/skill/<uuid>\",\n          \"name\": \"...\",\n          \"type\": \"essential\"\n        }\n      ]\n    }\n  ],\n  \"document_id\": \"doc-<uuid4>\"\n}\n```\n\n**Skill code:** Από την έκδοση 2026-05-21, το `skills[*].code` περιέχει το **επίσημο ESCO URI** όταν το `name` ταιριάζει με entry του ελληνικού ESCO 1.2.1 dataset. Αν το όνομα δεν βρεθεί, ο server γυρνά **synthetic fallback** (π.χ. `είδ-μετ`).\n\n**Σημαντικό:** Το `document_id` που επιστρέφει ο server είναι **το correlation id** που πρέπει να χρησιμοποιήσεις στα επόμενα `/api/generate-stream`, `/api/review`, `/api/generate-summary` και `/api/generate-bibliography` calls που αφορούν αυτό το έγγραφο.\n\nΤο post-response script αυτού του request σώζει αυτόματα το server-generated `document_id` στο `{{documentId}}` collection variable — άρα όλα τα επόμενα requests θα το πάρουν αυτόματα."
+      }
+    },
+    {
+      "name": "3. Generate stream — Standard mode  [Both]",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Αυτόματη συγκέντρωση όλων των content chunks σε ένα variable",
+              "// για να χρησιμοποιηθεί από το /api/generate-summary",
+              "const body = pm.response.text();",
+              "let content = '';",
+              "let referencesCount = 0;",
+              "for (const line of body.split('\\n')) {",
+              "  if (!line.startsWith('data:')) continue;",
+              "  try {",
+              "    const evt = JSON.parse(line.slice(5).trim());",
+              "    if (evt.type === 'content' && typeof evt.text === 'string') {",
+              "      content += evt.text;",
+              "    } else if (evt.type === 'references' && Array.isArray(evt.data)) {",
+              "      referencesCount = evt.data.length;",
+              "    }",
+              "  } catch (e) {}",
+              "}",
+              "try {",
+              "  const reqBody = JSON.parse(pm.request.body.raw);",
+              "  pm.collectionVariables.set('lastModuleTitle', reqBody.module.title || '');",
+              "} catch (e) {}",
+              "pm.collectionVariables.set('generatedContent', content);",
+              "console.log('✓ References:', referencesCount);",
+              "console.log('✓ Content length:', content.length, 'chars (~', Math.round(content.length / 3000), 'pages)');",
+              "console.log('✓ Saved to {{generatedContent}} for use in /api/generate-summary');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" },
+          { "key": "Accept", "value": "text/event-stream" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"module\": {\n    \"number\": 1,\n    \"title\": \"Διοίκηση Ολικής Ποιότητας\",\n    \"hours\": 10,\n    \"content\": \"\",\n    \"activities\": \"\",\n    \"skills\": []\n  },\n  \"use_research_hub\": true,\n  \"multipass\": false,\n  \"include_greek_sources\": true,\n  \"experimental_mode\": false,\n  \"user_instructions\": \"Έμφαση σε πρακτικά παραδείγματα από ελληνικές επιχειρήσεις του ιδιωτικού τομέα.\",\n  \"target_pages\": 3,\n  \"learning_outcomes\": \"Ο εκπαιδευόμενος θα μπορεί: 1) να αναγνωρίζει τις θεμελιώδεις αρχές TQM, 2) να εφαρμόζει το PDCA cycle σε λειτουργικά προβλήματα, 3) να ερμηνεύει βασικούς δείκτες ποιότητας.\",\n  \"keywords\": \"TQM, ISO 9001, Deming, PDCA, συνεχής βελτίωση, kaizen\",\n  \"previous_content\": \"\",\n  \"batch_number\": 1,\n  \"total_batches\": 1,\n  \"model_provider\": \"{{modelProvider}}\",\n  \"document_id\": \"{{documentId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/generate-stream",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generate-stream"]
+        },
+        "description": "**Standard mode** — παραγωγή υλικού από ένα topic χωρίς ESCO skills.\n\n**Όλα τα fields του body:**\n\n| Field | Παράδειγμα | Σημείωση |\n|-------|-----------|----------|\n| `module.number` | `1` | Αριθμός ενότητας |\n| `module.title` | `\"Διοίκηση Ολικής Ποιότητας\"` | Τίτλος ενότητας (όχι του προγράμματος) |\n| `module.hours` | `10` | Διδακτικές ώρες |\n| `module.content` | `\"\"` | Standard: κενό. ESCO: περιγραφή από εκπ. σχέδιο. |\n| `module.activities` | `\"\"` | Standard: κενό. ESCO: δραστηριότητες από σχέδιο. |\n| `module.skills` | `[]` | Standard: κενός πίνακας. ESCO: ESCO skills array. |\n| `use_research_hub` | `true` | Αναζήτηση πραγματικών papers |\n| `experimental_mode` | `false` | `true` = χωρίς Research Hub, anti-hallucination prompt |\n| `user_instructions` | string | Custom guidance στο μοντέλο |\n| `target_pages` | `3` | Στόχος σελίδων (~3000 chars/page) |\n| `learning_outcomes` | string | Μαθησιακά αποτελέσματα |\n| `keywords` | string | Comma-separated λέξεις κλειδιά |\n| `previous_content` | `\"\"` | Σε multi-batch: το approved content των προηγούμενων batches |\n| `batch_number` | `1` | Τρέχον batch |\n| `total_batches` | `1` | Συνολικά batches του module |\n| `model_provider` | `\"claude\"` / `\"openai\"` | LLM provider |\n| `document_id` | string | Σταθερό id ανά uploaded doc/draft session — εμφανίζεται στα backend logs |\n\nTο post-response script συγκεντρώνει όλα τα `content` chunks στο `{{generatedContent}}` variable για χρήση στα επόμενα requests."
+      }
+    },
+    {
+      "name": "4. Generate stream — ESCO mode  [Both]",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Ίδιο post-response script με το #4 — accumulates content για το /api/generate-summary",
+              "const body = pm.response.text();",
+              "let content = '';",
+              "let referencesCount = 0;",
+              "for (const line of body.split('\\n')) {",
+              "  if (!line.startsWith('data:')) continue;",
+              "  try {",
+              "    const evt = JSON.parse(line.slice(5).trim());",
+              "    if (evt.type === 'content' && typeof evt.text === 'string') {",
+              "      content += evt.text;",
+              "    } else if (evt.type === 'references' && Array.isArray(evt.data)) {",
+              "      referencesCount = evt.data.length;",
+              "    }",
+              "  } catch (e) {}",
+              "}",
+              "try {",
+              "  const reqBody = JSON.parse(pm.request.body.raw);",
+              "  pm.collectionVariables.set('lastModuleTitle', reqBody.module.title || '');",
+              "} catch (e) {}",
+              "pm.collectionVariables.set('generatedContent', content);",
+              "console.log('✓ References:', referencesCount);",
+              "console.log('✓ Content length:', content.length, 'chars (~', Math.round(content.length / 3000), 'pages)');",
+              "console.log('✓ Saved to {{generatedContent}} for use in /api/generate-summary');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" },
+          { "key": "Accept", "value": "text/event-stream" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"module\": {\n    \"number\": 1,\n    \"title\": \"Μεταλλουργικές Βάσεις για Όλκηση\",\n    \"hours\": 14,\n    \"content\": \"Βασικές αρχές μεταλλουργίας, ιδιότητες μετάλλων και κραμάτων που χρησιμοποιούνται στη διαδικασία ψυχρής ολκής. Επεξήγηση πλαστικής παραμόρφωσης, σκληρότητας και αντοχής εφελκυσμού σε συνάρτηση με την ψυχρή κατεργασία.\",\n    \"activities\": \"Πρακτική αναγνώριση μετάλλων στο εργαστήριο, μετρήσεις σκληρότητας Brinell/Rockwell, ανάλυση μηχανικών ιδιοτήτων δοκιμίων μετά από ψυχρή ολκή.\",\n    \"skills\": [\n      { \"code\": \"S1.1\", \"name\": \"μεταλλουργία\", \"type\": \"essential\" },\n      { \"code\": \"S1.2\", \"name\": \"μηχανικές ιδιότητες υλικών\", \"type\": \"essential\" },\n      { \"code\": \"S1.3\", \"name\": \"ψυχρή κατεργασία μετάλλων\", \"type\": \"essential\" },\n      { \"code\": \"S1.4\", \"name\": \"ποιοτικός έλεγχος υλικών\", \"type\": \"optional\" }\n    ]\n  },\n  \"use_research_hub\": true,\n  \"multipass\": false,\n  \"include_greek_sources\": true,\n  \"experimental_mode\": false,\n  \"user_instructions\": \"\",\n  \"target_pages\": 3,\n  \"learning_outcomes\": \"Ο/η εκπαιδευόμενος/η: 1) αναγνωρίζει τις βασικές κατηγορίες μετάλλων που υφίστανται ψυχρή ολκή, 2) ερμηνεύει διαγράμματα τάσης-παραμόρφωσης, 3) επιλέγει κατάλληλο υλικό βάσει απαιτήσεων εφαρμογής.\",\n  \"keywords\": \"ψυχρή ολκή, μεταλλουργία, πλαστική παραμόρφωση, μηχανικές ιδιότητες, κράματα\",\n  \"previous_content\": \"\",\n  \"batch_number\": 1,\n  \"total_batches\": 1,\n  \"model_provider\": \"{{modelProvider}}\",\n  \"document_id\": \"{{documentId}}\",\n  \"occupation\": {\n    \"code\": \"7223.4\",\n    \"name\": \"χειριστής/χειρίστρια μηχανών ψυχρής ολκής\",\n    \"description\": \"Χειρίζεται και επιβλέπει βιομηχανικές μηχανές ψυχρής ολκής για παραγωγή σύρματος, ράβδων και σωλήνων από μέταλλα και κράματα. Ρυθμίζει φιλιέρες, ελέγχει ποιότητα και διαστάσεις.\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/generate-stream",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generate-stream"]
+        },
+        "description": "**ESCO mode** — παραγωγή υλικού με ESCO skills + program-level occupation context.\n\n**Διαφορές από Standard:**\n\n| Field | Standard | ESCO |\n|-------|----------|------|\n| `module.skills` | `[]` (κενό) | Γεμάτος πίνακας από εκπαιδευτικό σχέδιο |\n| `module.content` | `\"\"` | Περιγραφή ενότητας από εκπ. σχέδιο |\n| `module.activities` | `\"\"` | Δραστηριότητες από εκπ. σχέδιο |\n| `occupation` | συνήθως απουσιάζει | Συμπληρώνεται με το επάγγελμα που στοχεύει το ολόκληρο πρόγραμμα |\n\n**Το `occupation` field:**\n- **Program-level**: είναι το **ίδιο** για όλες τις ενότητες του ίδιου εκπαιδευτικού προγράμματος (π.χ. και οι 10 ενότητες του «Πρόγραμμα για χειριστές μηχανών ψυχρής ολκής» στέλνονται με το ίδιο `occupation`).\n- **Optional**: αν παραλειφθεί, το prompt μένει χωρίς context επαγγέλματος.\n- **Σχήμα**: `{ \"code\": \"7223.4\", \"name\": \"...\", \"description\": \"...\" }`. Μόνο το `name` είναι required αν στείλεις το object.\n- **Αξιοποίηση**: το backend το προσθέτει ως context line στο prompt («Επάγγελμα-στόχος (ESCO): ...») ώστε το μοντέλο να προσαρμόσει ορολογία, παραδείγματα και πρακτικές εφαρμογές στο συγκεκριμένο επάγγελμα.\n\n**Σύγκριση με `module.skills`:**\n- `module.skills` = ανά ενότητα (κάθε ενότητα έχει τις δικές της δεξιότητες)\n- `occupation` = ανά πρόγραμμα (ίδιο σε όλες τις ενότητες)\n\nΤο post-response script συγκεντρώνει το output στο `{{generatedContent}}` variable."
+      }
+    },
+    {
+      "name": "5. Generate summary  [Both]",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"module_title\": \"{{lastModuleTitle}}\",\n  \"full_content\": {{contentJson}},\n  \"model_provider\": \"{{modelProvider}}\",\n  \"document_id\": \"{{documentId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/generate-summary",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generate-summary"]
+        },
+        "description": "Παράγει περίληψη 500-800 λέξεων από το `{{generatedContent}}` (auto-populated από το προηγούμενο `/api/generate-stream` call).\n\n**Body fields:**\n| Field | Required | Σημείωση |\n|-------|----------|----------|\n| `module_title` | Ναι | Τίτλος ενότητας — μπαίνει στο prompt για context |\n| `full_content` | Ναι | Όλο το approved περιεχόμενο (όλα τα batches ενωμένα) |\n| `model_provider` | Όχι (default claude) | claude / openai |\n| `document_id` | Όχι | Correlation id (logs only) — να είναι ίδιο με του `/api/generate-stream` της ίδιας εργασίας |"
+      }
+    },
+    {
+      "name": "6. Generate bibliography  [Both — fallback]",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"citations\": [\n    \"Deming, 1986\",\n    \"Porter & Kramer, 2011\",\n    \"Kotter, 1996\",\n    \"Κωνσταντινίδης, 2024\"\n  ],\n  \"topic\": \"Διοίκηση Ολικής Ποιότητας\",\n  \"model_provider\": \"{{modelProvider}}\",\n  \"document_id\": \"{{documentId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/generate-bibliography",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generate-bibliography"]
+        },
+        "description": "**Fallback endpoint** — παράγει APA 7th βιβλιογραφικές εγγραφές από in-text citations.\n\nΧρησιμοποιείται αυτόματα από το frontend μόνο όταν η κύρια παραγωγή `/api/generate-stream` δεν επέστρεψε βιβλιογραφία (π.χ. το stream κόπηκε στη μέση).\n\n**Body fields:**\n| Field | Required | Σημείωση |\n|-------|----------|----------|\n| `citations` | Ναι | Array από strings τύπου `\"Συγγραφέας, Έτος\"` ή `\"Συγγραφέας1 & Συγγραφέας2, Έτος\"` |\n| `topic` | Όχι | Θέμα ενότητας — βοηθάει το μοντέλο στο context |\n| `model_provider` | Όχι | claude / openai |\n| `document_id` | Όχι | Correlation id |"
+      }
+    },
+    {
+      "name": "7. ESCO skill coverage review  [ESCO only]",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"module\": {\n    \"number\": 1,\n    \"title\": \"Μεταλλουργικές Βάσεις για Όλκηση\",\n    \"hours\": 14,\n    \"skills\": [\n      { \"code\": \"S1.1\", \"name\": \"μεταλλουργία\", \"type\": \"essential\" },\n      { \"code\": \"S1.2\", \"name\": \"μηχανικές ιδιότητες υλικών\", \"type\": \"essential\" },\n      { \"code\": \"S1.3\", \"name\": \"ψυχρή κατεργασία μετάλλων\", \"type\": \"essential\" },\n      { \"code\": \"S1.4\", \"name\": \"ποιοτικός έλεγχος υλικών\", \"type\": \"optional\" }\n    ]\n  },\n  \"content\": {{contentJson}},\n  \"model_provider\": \"{{modelProvider}}\",\n  \"document_id\": \"{{documentId}}\",\n  \"occupation\": {\n    \"code\": \"7223.4\",\n    \"name\": \"χειριστής/χειρίστρια μηχανών ψυχρής ολκής\",\n    \"description\": \"Χειρίζεται και επιβλέπει βιομηχανικές μηχανές ψυχρής ολκής για παραγωγή σύρματος, ράβδων και σωλήνων.\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/review",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "review"]
+        },
+        "description": "**Επίσημο endpoint για ESCO skill coverage analysis.** Αναλύει πόσο καλά καλύπτονται οι ESCO skills στο παραγόμενο υλικό.\n\n**Body fields:**\n| Field | Required | Σημείωση |\n|-------|----------|----------|\n| `module` | Ναι | Object με `number`, `title`, `skills` (αρκούν αυτά για review) |\n| `module.skills` | Ναι | Array από ESCO skills `{ code, name, type }` |\n| `content` | Ναι | Όλο το παραγόμενο υλικό προς αξιολόγηση (markdown). Πρώτοι 50K chars χρησιμοποιούνται. |\n| `model_provider` | Όχι | claude / openai |\n| `document_id` | Όχι | Correlation id |\n| `occupation` | Όχι | Program-level ESCO occupation context. Όταν παρέχεται, μπαίνει στο review prompt ώστε η αξιολόγηση να γίνεται σε αυτό το πλαίσιο επαγγέλματος. |\n\n**Response:** structured JSON με per-skill `coverageLevel` (full/partial/missing), `evidence` quotes, `contentSections`, `notes`, `overallAssessment`, `recommendations`, και εκτιμώμενο `coveragePercentage`.\n\n**Σύνηθης ροή:** Τρέξε πρώτα το `#5` (ESCO generate) ώστε το `{{generatedContent}}` να γεμίσει με πραγματικό υλικό, μετά αυτό το request θα κάνει review πάνω σε αυτό."
+      }
+    },
+    {
+      "name": "8. LLM proxy  [DEPRECATED — legacy]",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"system\": \"Είσαι ένας βοηθός που επιστρέφει σύντομη απάντηση στα ελληνικά.\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Γράψε μια πρόταση για το TQM.\" }\n  ],\n  \"maxTokens\": 200,\n  \"model_provider\": \"{{modelProvider}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/claude/generate",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "claude", "generate"]
+        },
+        "description": "⚠️ **DEPRECATED για νέα integrations.**\n\nGeneric LLM proxy που παλιότερα χρησιμοποιούσε το frontend για ESCO skill review. Έχει αντικατασταθεί από το δεδικευμένο `POST /api/review` (request #8) — διατηρείται μόνο για backward compatibility.\n\nΓια νέα integrations:\n- Για ESCO review → χρησιμοποίησε το `#8 /api/review`\n- Για παραγωγή υλικού → `#4` / `#5` `/api/generate-stream`\n- Για περίληψη → `#6 /api/generate-summary`\n- Για βιβλιογραφία → `#7 /api/generate-bibliography`\n\nΑυτό το request διατηρείται μόνο για debugging/troubleshooting."
+      }
+    },
+    {
+      "name": "9. DOCX → Markdown  [helper για revision]",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Helper endpoint: server μετατρέπει .docx σε markdown για revision mode.",
+              "// Σώζει: markdown → {{generatedContent}}, document_id → {{documentId}},",
+              "// και εξάγει το πρώτο H1 ως {{lastModuleTitle}} ώστε το #10 να έχει σωστό title.",
+              "try {",
+              "  const body = pm.response.json();",
+              "  if (body && body.document_id) {",
+              "    pm.collectionVariables.set('documentId', body.document_id);",
+              "    console.log('✓ document_id set from server:', body.document_id);",
+              "  }",
+              "  if (body && typeof body.markdown === 'string') {",
+              "    pm.collectionVariables.set('generatedContent', body.markdown);",
+              "    console.log('✓ markdown', body.markdown.length, 'chars → {{generatedContent}} (έτοιμο για #10 revision)');",
+              "    // Εξαγωγή πρώτου H1 ως lastModuleTitle (πέφτει σε H2 αν δεν υπάρχει H1).",
+              "    const h1 = body.markdown.match(/^#\\s+(.+)$/m);",
+              "    const h2 = body.markdown.match(/^##\\s+(.+)$/m);",
+              "    const title = (h1 && h1[1] && h1[1].trim()) || (h2 && h2[1] && h2[1].trim()) || '';",
+              "    if (title) {",
+              "      pm.collectionVariables.set('lastModuleTitle', title);",
+              "      console.log('✓ lastModuleTitle:', title);",
+              "    }",
+              "  }",
+              "} catch (e) {",
+              "  console.warn('Could not parse docx-to-markdown response:', e.message);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Session-ID", "value": "{{sessionId}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": [],
+              "description": "Επίλεξε ένα .docx εκπαιδευτικό υλικό που θέλεις να αναθεωρήσεις (max 10 MB)"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/docx-to-markdown",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "docx-to-markdown"]
+        },
+        "description": "**Helper endpoint** για consumers που θέλουν να ξεκινήσουν τη ροή revision από `.docx` αρχείο χωρίς να συντηρούν δικό τους .docx → markdown parser.\n\n**Διαφορά από `#2 /api/parse-docx`:**\n\n| Endpoint | Επιστρέφει | Use case |\n|----------|-----------|----------|\n| `#2 /api/parse-docx` | Structured JSON (`modules`, `skills`, `totalHours`) | ESCO mode — ξεκινάς νέο εκπαιδευτικό σχέδιο |\n| **`#11 /api/docx-to-markdown`** | **Markdown string** του πλήρους περιεχομένου | Revision mode — έχεις ήδη υλικό σε `.docx` και θες στοχευμένες αλλαγές |\n\n**Response:**\n```json\n{\n  \"markdown\": \"# Heading\\n\\nParagraph με **bold** και *italic*\\n\\n- bullet 1\\n- bullet 2\",\n  \"document_id\": \"doc-<uuid4>\"\n}\n```\n\n**Pipeline server-side:** `mammoth` (.docx → HTML διατηρώντας structure) → `markdownify` (HTML → markdown με ATX headings `#`, bullets `-`).\n\n**Τυπική ροή:**\n1. Τρέξε αυτό το request → server γυρίζει `markdown` + `document_id`\n2. Test script αυτόματα σώζει: `markdown` → `{{generatedContent}}`, `document_id` → `{{documentId}}`\n3. Τρέξε `#10` Revision mode — διαβάζει αυτόματα το markdown ως `current_draft` και χρησιμοποιεί το `document_id`\n4. Άλλαξε το `user_instructions` σε ό,τι θες — επανέλαβε για διαδοχικές αναθεωρήσεις"
+      }
+    },
+    {
+      "name": "10. Generate stream — Revision mode  [Both]",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Warn-only: το JSON-escaping του draft γίνεται στο collection-level pre-request",
+              "// (γέμισμα του {{contentJson}}). Εδώ απλά επιβεβαιώνουμε ότι υπάρχει draft.",
+              "const draft = pm.collectionVariables.get('generatedContent') || '';",
+              "if (!draft.trim()) {",
+              "  console.warn('⚠ {{generatedContent}} είναι κενό. Τρέξε πρώτα το #3 ή #4 ή #9.');",
+              "} else {",
+              "  console.log('✓ Draft', draft.length, 'chars → πάει στο body μέσω {{contentJson}}');",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Παρακολούθηση revision output. Σε revision mode το backend ΔΕΝ στέλνει 'references' event.",
+              "const body = pm.response.text();",
+              "let revisedContent = '';",
+              "let referencesCount = 0;",
+              "let sawDone = false;",
+              "for (const line of body.split('\\n')) {",
+              "  if (!line.startsWith('data:')) continue;",
+              "  try {",
+              "    const evt = JSON.parse(line.slice(5).trim());",
+              "    if (evt.type === 'content' && typeof evt.text === 'string') {",
+              "      revisedContent += evt.text;",
+              "    } else if (evt.type === 'references' && Array.isArray(evt.data)) {",
+              "      referencesCount = evt.data.length;",
+              "    } else if (evt.type === 'done') {",
+              "      sawDone = true;",
+              "    }",
+              "  } catch (e) {}",
+              "}",
+              "",
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Stream ολοκληρώθηκε (done event)', () => pm.expect(sawDone).to.equal(true));",
+              "pm.test('Revision mode δεν στέλνει references event', () => pm.expect(referencesCount).to.equal(0));",
+              "pm.test('Έλαβα αναθεωρημένο content', () => pm.expect(revisedContent.length).to.be.greaterThan(500));",
+              "",
+              "// Σώσε το αναθεωρημένο draft πίσω στο variable για επαναλαμβανόμενες αναθεωρήσεις.",
+              "pm.collectionVariables.set('generatedContent', revisedContent);",
+              "console.log('✓ Revised length:', revisedContent.length, 'chars (~', Math.round(revisedContent.length / 3000), 'pages)');",
+              "console.log('✓ Saved back to {{generatedContent}} — μπορείς να ξανατρέξεις το #10 με νέες οδηγίες');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Session-ID", "value": "{{sessionId}}" },
+          { "key": "Accept", "value": "text/event-stream" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"module\": {\n    \"number\": 1,\n    \"title\": \"{{lastModuleTitle}}\",\n    \"hours\": 10,\n    \"content\": \"\",\n    \"activities\": \"\",\n    \"skills\": []\n  },\n  \"mode\": \"revision\",\n  \"current_draft\": {{contentJson}},\n  \"user_instructions\": \"Στην υποενότητα 1.2, αντικατάστησε το πρώτο παράδειγμα με ένα από ελληνική επιχείρηση. Άφησε όλα τα υπόλοιπα ως έχουν.\",\n  \"target_pages\": 3,\n  \"batch_number\": 1,\n  \"total_batches\": 1,\n  \"model_provider\": \"{{modelProvider}}\",\n  \"document_id\": \"{{documentId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/generate-stream",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "generate-stream"]
+        },
+        "description": "**Revision mode** — στοχευμένη αναθεώρηση υπάρχοντος draft.\n\n**Ροή χρήσης:**\n1. Τρέξε πρώτα το #4 (Standard) ή #5 (ESCO) — αυτά γεμίζουν το `{{generatedContent}}` variable.\n2. Τρέξε αυτό το request — το `current_draft` διαβάζει αυτόματα το `{{generatedContent}}` και στέλνει την οδηγία στο `user_instructions`.\n3. Άλλαξε το `user_instructions` σε ό,τι θες (πχ \"στην 1.3 πρόσθεσε άλλο παράδειγμα\").\n4. Ξανατρέξε — το νέο αναθεωρημένο draft σώζεται πάλι στο `{{generatedContent}}` (αλυσιδωτές αναθεωρήσεις).\n\n**Τι περιμένεις:**\n- Stream με `content` events + τελικό `done`. Όχι `references` event (το draft έχει ήδη βιβλιογραφία).\n- Το output πρέπει να έχει αλλάξει ΜΟΝΟ εκεί που ζητήθηκε. Διαφορά με το αρχικό content μπορείς να δεις στο Postman Console.\n\n**Καλύπτει και τη ροή «Επεξεργασία υλικού»:** όταν ο χρήστης ανεβάζει .docx από το tab «Επεξεργασία υλικού», το frontend το γυρίζει σε markdown και το στέλνει στο ίδιο endpoint με `mode: \"revision\"` — δηλαδή ίδιο API call.\n\n**Custom draft:** αν θες να δοκιμάσεις χωρίς να τρέξεις το #4 πρώτα, αντικατάστησε το `{{generatedContent}}` στο body με literal JSON string π.χ. `\"# Test draft\\n\\n## Υποενότητα 1.1\\n...\"`. Πρόσεξε να είναι valid JSON string με escaped newlines."
+      }
+    }
+  ]
+}

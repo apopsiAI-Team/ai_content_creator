@@ -1,0 +1,69 @@
+# Release configuration for Homebrew formula updates
+# This file helps automate the process of updating the Homebrew formula
+
+[package]
+name = "rust-sci-hub-mcp"
+version = "0.1.0"
+repository = "https://github.com/yourusername/rust-sci-hub-mcp"
+
+[formula]
+file = "homebrew/rust-sci-hub-mcp.rb"
+class_name = "RustSciHubMcp"
+
+[release]
+# GitHub release settings
+create_github_release = true
+draft = false
+prerelease = false
+generate_release_notes = true
+
+# Asset patterns to include in release
+assets = [
+    "target/release/rust-sci-hub-mcp",
+    "README.md",
+    "LICENSE",
+    "docs/",
+    "launchd/",
+    "scripts/"
+]
+
+# Archive settings
+archive_name = "rust-sci-hub-mcp-{version}-{target}.tar.gz"
+
+[targets]
+# macOS targets for universal binary support
+[[targets.macos]]
+name = "x86_64-apple-darwin"
+description = "macOS Intel"
+
+[[targets.macos]]
+name = "aarch64-apple-darwin" 
+description = "macOS Apple Silicon"
+
+[homebrew]
+# Homebrew formula update settings
+formula_path = "homebrew/rust-sci-hub-mcp.rb"
+tap_repository = "yourusername/homebrew-rust-sci-hub-mcp"
+
+# Dependencies
+build_dependencies = [
+    "rust",
+    "pkg-config"
+]
+
+runtime_dependencies = [
+    "openssl@3",
+    "curl"
+]
+
+# Test commands for formula validation
+test_commands = [
+    "rust-sci-hub-mcp --version",
+    "rust-sci-hub-mcp --help"
+]
+
+[checksums]
+# Checksum algorithm
+algorithm = "sha256"
+# File to store checksums
+file = "homebrew/checksums.txt"

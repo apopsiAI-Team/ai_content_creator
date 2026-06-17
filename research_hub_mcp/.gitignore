@@ -1,0 +1,86 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+*.pdb
+*.dxt
+
+# Cargo
+# Note: Cargo.lock should be committed for applications (removed from ignore)
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+*.orig
+*.log
+tarpaulin-report.html
+cobertura.xml
+
+# Environment
+.env
+.env.local
+
+# Downloaded papers (for testing)
+/downloads/
+/test-downloads/
+*.pdf
+
+# Cache and temporary files
+*.cache
+*.tmp
+/tmp/
+
+# macOS (additional entries removed to avoid duplicates)
+.AppleDouble
+.LSOverride
+
+# Configuration overrides (local development)
+config.local.toml
+config.development.toml
+
+# Benchmark results
+/benches/target/
+
+# Documentation build
+/target/doc
+
+# Coverage reports
+/coverage/
+*.profraw
+*.profdata
+
+# Python (for any scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# Test outputs
+/test_output/
+test_*.log
+
+# Personal notes
+NOTES.md
+TODO.md
+.notes/
+
+# Metadata cache
+.metadata_cache/
+
+# Editor temp files (duplicate *.orig removed)
+*.bak
+*.tmp
+*.temp
+
+# OS temp files
+Thumbs.db
+Desktop.ini

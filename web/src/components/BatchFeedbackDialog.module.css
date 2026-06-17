@@ -1,0 +1,138 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 31, 53, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.dialog {
+  width: 90%;
+  max-width: 600px;
+  background: var(--warm-white);
+  border-radius: 16px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.header {
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--parchment-dark);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.body {
+  padding: var(--space-lg) var(--space-xl);
+}
+
+.previewLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--graphite);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-xs);
+}
+
+.preview {
+  padding: var(--space-md);
+  background: var(--parchment);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  color: var(--graphite);
+  line-height: 1.5;
+  max-height: 120px;
+  overflow-y: auto;
+  margin-bottom: var(--space-lg);
+  white-space: pre-wrap;
+}
+
+.feedbackLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink-navy);
+  margin-bottom: var(--space-xs);
+  display: block;
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--space-md);
+  border: 1px solid var(--parchment-dark);
+  border-radius: 8px;
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  color: var(--ink-navy);
+  background: var(--warm-white);
+  resize: vertical;
+  min-height: 100px;
+  transition: border-color var(--transition-fast);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--burnt-sienna);
+}
+
+.textarea::placeholder {
+  color: var(--parchment-dark);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-xl);
+  border-top: 1px solid var(--parchment-dark);
+  background: var(--parchment);
+}
+
+.cancelButton {
+  padding: var(--space-sm) var(--space-lg);
+  border: 1px solid var(--parchment-dark);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--graphite);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cancelButton:hover {
+  background: var(--parchment-dark);
+  color: var(--ink-navy);
+}
+
+.submitButton {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  border-radius: 8px;
+  background: var(--burnt-sienna);
+  color: var(--warm-white);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.submitButton:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}

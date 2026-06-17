@@ -1,0 +1,72 @@
+# ===== Environment & Secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+*.egg-info/
+
+# ===== Node.js =====
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# ===== Rust =====
+target/
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Deploy secrets (keep .example files)
+deploy/env/backend.env
+
+# ===== Project-specific =====
+# Backup archives
+*.zip
+
+# Generated output
+output/
+
+# Auto-generated docs
+backend_py/docs/
+
+# Old empty scaffold (replaced by backend_py/)
+src/edu_material_creator/
+
+# Temp/scratch files
+*.tmp
+*.cache
+*.log
+1.png
+vite_conf.txt
+
+# Local assistant/tool scratch
+.codex
+.playwright-mcp/
+
+# Claude Code internal
+.claude/
+
+# Coverage & reports
+coverage/
+*.profraw
+*.profdata
+tarpaulin-report.html
+cobertura.xml

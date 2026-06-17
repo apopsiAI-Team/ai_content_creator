@@ -1,0 +1,33 @@
+[profile.default]
+# Run tests in parallel, but limit to avoid overwhelming APIs
+test-threads = 4
+
+# Retry flaky tests up to 2 times
+retries = 2
+
+# Show output for failing tests
+failure-output = "final"
+
+# Show output for slow tests (over 60s)
+slow-timeout = { period = "60s", grace-period = "10s" }
+
+# Configure test groups for better organization
+[profile.default.groups]
+unit = { max-threads = 8 }
+integration = { max-threads = 2 }  # Slower for API tests
+e2e = { max-threads = 1 }         # Sequential for end-to-end tests
+
+# Custom profile for CI with more conservative settings
+[profile.ci]
+test-threads = 2
+retries = 1
+failure-output = "immediate"
+slow-timeout = { period = "120s", grace-period = "30s" }
+
+# Profile for local development with more verbose output
+[profile.dev]
+test-threads = 8
+retries = 0
+failure-output = "immediate"
+success-output = "never"
+status-level = "all"

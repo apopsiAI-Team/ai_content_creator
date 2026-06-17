@@ -1,0 +1,169 @@
+[package]
+authors = ["C. Thomas Brittain <cthomasbrittain@hotmail.com>"]
+categories = ["command-line-utilities", "science"]
+description = "A Model Context Protocol (MCP) server for accumulating and organizing academic knowledge"
+edition = "2021"
+keywords = ["mcp", "academic", "papers", "research", "knowledge"]
+license = "GPL-3.0"
+name = "rust-research-mcp"
+repository = "https://github.com/Ladvien/sci_hub_mcp"
+rust-version = "1.70"
+version = "0.6.7"
+exclude = [
+    "build/",
+    "target/",
+    "benches/",
+    "tests/fixtures/",
+    "*.tar.gz",
+    ".github/",
+    "scripts/",
+    "docs/",
+]
+
+[dependencies]
+# MCP Framework
+rmcp = {version = "0.5", features = ["transport-io", "transport-child-process"]}
+
+# Async runtime
+async-trait = "0.1"
+tokio = {version = "1.0", features = ["full"]}
+
+# Serialization
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# CLI argument parsing
+clap = {version = "4.0", features = ["derive"]}
+
+# Structured logging
+tracing = "0.1"
+tracing-subscriber = {version = "0.3.20", features = ["env-filter", "json"]}
+
+# HTTP client
+reqwest = {version = "0.11", features = ["json", "stream", "gzip", "rustls-tls"]}
+
+# Research client dependencies
+futures = "0.3" # Async utilities
+regex = "1.0" # Regular expressions for pattern matching
+scraper = "0.19" # HTML parsing for research source responses
+tokio-retry = "0.3" # Retry mechanisms with exponential backoff
+url = "2.0" # URL parsing and manipulation
+urlencoding = "2.1" # URL encoding for DOIs
+
+# Resilience and circuit breaker
+backoff = "0.4" # Backoff strategies for retries
+failsafe = "1.3" # Circuit breaker pattern implementation
+rand = "0.8" # Random number generation for jitter
+
+# Configuration management
+config = "0.14" 
+envy = "0.4" # Environment variable parsing
+schemars = {version = "1.0", features = ["chrono04", "uuid1"]}# JSON Schema generation 
+toml = "0.8" 
+
+# Utilities
+chrono = {version = "0.4", features = ["serde"]}
+dirs = "5.0"
+uuid = {version = "1.0", features = ["v4"]}
+
+# File operations and hashing
+sha2 = "0.10" # SHA256 hashing for file integrity
+
+# PDF parsing and metadata extraction
+bincode = "1.3" # Serialization for cache storage
+lopdf = "0.34" # PDF parsing and manipulation
+sled = "0.34" # Embedded database for caching
+
+# Signal handling and I/O utilities
+tokio-util = {version = "0.7", features = ["io"]}
+
+# XML parsing for arXiv API
+roxmltree = "0.20" # Fast XML parser for arXiv Atom feeds
+
+# Daemon and service management
+axum = {version = "0.7", features = ["http2"]}# For health check endpoint
+daemonize = "0.5"
+nix = {version = "0.29", features = ["signal", "process", "fs"]}
+signal-hook = "0.3"
+signal-hook-tokio = {version = "0.3", features = ["futures-v0_3"]}
+syslog = "7.0"
+tokio-metrics = "0.3"
+tower = "0.5"
+tower-http = {version = "0.6", features = ["trace", "cors"]}
+
+# Terminal detection
+atty = "0.2"
+
+[dev-dependencies]
+# Testing
+proptest = "1.0"
+tempfile = "3.0"
+tokio-test = "0.4"
+wiremock = "0.5"
+
+# Benchmarking
+criterion = {version = "0.5", features = ["html_reports"]}
+
+# Test coverage - tarpaulin is installed as a cargo plugin, not a dependency
+# Install with: cargo install cargo-tarpaulin
+
+[build-dependencies]
+# For generating build info
+vergen = {version = "8.0", features = ["build", "git", "gitcl"]}
+
+[[bin]]
+name = "rust-research-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "rust_research_mcp"
+path = "src/lib.rs"
+
+[[bench]]
+harness = false
+name = "search_bench"
+
+[[bench]]
+harness = false
+name = "download_bench"
+
+[[bench]]
+harness = false
+name = "server_bench"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true
+
+[profile.dev]
+debug = true
+incremental = true
+
+# Cargo configuration for clippy
+[lints.clippy]
+all = {level = "warn", priority = -1}
+cargo = {level = "warn", priority = -1}
+nursery = {level = "warn", priority = -1}
+pedantic = {level = "warn", priority = -1}
+# Allow some pedantic lints that are too strict
+missing-errors-doc = "allow"
+missing-panics-doc = "allow"
+module-name-repetitions = "allow"
+# Allow multiple crate versions as this is common in early development
+multiple-crate-versions = "allow"
+
+[lints.rust]
+missing_docs = "allow" # Will be enabled after initial setup
+unsafe_code = "forbid" 
+unused_extern_crates = "warn" 
+unused_import_braces = "warn" 
+unused_qualifications = "warn" 
+
+[workspace]
+members = ["."]

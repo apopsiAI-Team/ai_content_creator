@@ -1,0 +1,12 @@
+venv/
+web/node_modules/
+web/dist/
+research_hub_mcp/target/
+output/
+*.zip
+*.log
+.env
+web/.env
+__pycache__/
+**/__pycache__/
+*.pyc

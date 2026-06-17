@@ -1,0 +1,111 @@
+{
+  "dxt_version": "0.1",
+  "name": "rust-research-mcp",
+  "display_name": "Rust Research MCP",
+  "version": "0.6.6",
+  "description": "Academic research paper search and download tools",
+  "author": {
+    "name": "C. Thomas Brittain"
+  },
+  "server": {
+    "type": "binary",
+    "entry_point": "/Users/ladvien/.cargo/bin/rust-research-mcp",
+    "mcp_config": {
+      "command": "/Users/ladvien/.cargo/bin/rust-research-mcp",
+      "args": [],
+      "env": {
+        "RUST_LOG": "${log_level}",
+        "RSH_DOWNLOAD_DIRECTORY": "${download_directory}",
+        "RSH_MAX_CONCURRENT_DOWNLOADS": "${max_concurrent_downloads}",
+        "RSH_MAX_FILE_SIZE_MB": "${max_file_size_mb}",
+        "RSH_RATE_LIMIT_PER_SEC": "${rate_limit}",
+        "RSH_CATEGORIZATION_ENABLED": "${enable_categorization}",
+        "RSH_CATEGORIZATION_LLM_PROVIDER": "${llm_provider}",
+        "RSH_CATEGORIZATION_LLM_API_KEY": "${llm_api_key}",
+        "RSH_CATEGORIZATION_LLM_MODEL": "${llm_model}"
+      }
+    }
+  },
+  "user_config": {
+    "download_directory": {
+      "type": "directory",
+      "title": "Download Directory",
+      "description": "Directory where research papers will be saved",
+      "required": true,
+      "default": "${HOME}/Documents/Research-Papers"
+    },
+    "max_concurrent_downloads": {
+      "type": "number",
+      "title": "Maximum Concurrent Downloads",
+      "description": "Number of papers that can be downloaded simultaneously",
+      "required": false,
+      "default": 3,
+      "min": 1,
+      "max": 10
+    },
+    "max_file_size_mb": {
+      "type": "number",
+      "title": "Maximum File Size (MB)",
+      "description": "Maximum size of papers to download in megabytes",
+      "required": false,
+      "default": 100,
+      "min": 10,
+      "max": 500
+    },
+    "rate_limit": {
+      "type": "number",
+      "title": "Rate Limit (requests/sec)",
+      "description": "Maximum requests per second to research sources",
+      "required": false,
+      "default": 1,
+      "min": 0.1,
+      "max": 5
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log Level",
+      "description": "Logging verbosity level",
+      "required": false,
+      "default": "info",
+      "enum": ["debug", "info", "warn", "error"]
+    },
+    "enable_categorization": {
+      "type": "boolean",
+      "title": "Enable AI Categorization",
+      "description": "Automatically categorize papers using AI",
+      "required": false,
+      "default": false
+    },
+    "llm_provider": {
+      "type": "string",
+      "title": "LLM Provider",
+      "description": "AI provider for paper categorization",
+      "required": false,
+      "default": "openai",
+      "enum": ["openai", "anthropic", "local"],
+      "visible_when": {
+        "enable_categorization": true
+      }
+    },
+    "llm_api_key": {
+      "type": "string",
+      "title": "LLM API Key",
+      "description": "API key for the selected LLM provider",
+      "sensitive": true,
+      "required": false,
+      "visible_when": {
+        "enable_categorization": true
+      }
+    },
+    "llm_model": {
+      "type": "string",
+      "title": "LLM Model",
+      "description": "Specific model to use for categorization",
+      "required": false,
+      "default": "gpt-4o-mini",
+      "visible_when": {
+        "enable_categorization": true
+      }
+    }
+  }
+}

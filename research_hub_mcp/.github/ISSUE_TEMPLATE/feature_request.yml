@@ -1,0 +1,126 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a new feature! Please fill out the sections below to help us understand your proposal.
+
+  - type: checkboxes
+    id: search
+    attributes:
+      label: "Search existing requests"
+      description: "Please search existing issues to avoid duplicates"
+      options:
+        - label: "I have searched existing issues and this is not a duplicate"
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem Statement"
+      description: "What problem does this feature solve? What's the motivation?"
+      placeholder: "I'm frustrated when... It would be helpful if..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Proposed Solution"
+      description: "What would you like to happen? Describe your ideal solution."
+      placeholder: "I would like..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives Considered"
+      description: "What alternatives have you considered? Why don't they work?"
+      placeholder: "I considered... but it doesn't work because..."
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority"
+      description: "How important is this feature to you?"
+      options:
+        - "Low - Nice to have"
+        - "Medium - Would be helpful"
+        - "High - Important for my workflow"
+        - "Critical - Blocking my use case"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: "Feature Category"
+      description: "What area does this feature relate to?"
+      options:
+        - "Academic Providers - New search sources"
+        - "Search Functionality - Query and filtering"
+        - "Download Management - File handling"
+        - "Metadata Extraction - Paper information"
+        - "Configuration - Setup and settings"
+        - "Performance - Speed and efficiency"
+        - "Documentation - Guides and examples"
+        - "Integration - MCP and external tools"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: "Use Case"
+      description: "Describe how you would use this feature in your academic research workflow"
+      placeholder: "In my research, I often need to... This feature would help by..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: "Implementation Ideas"
+      description: "If you have ideas about how this could be implemented, share them here"
+      placeholder: "This could work by... Maybe using..."
+
+  - type: checkboxes
+    id: breaking
+    attributes:
+      label: "Breaking Changes"
+      description: "Would this feature require breaking changes?"
+      options:
+        - label: "This feature would require breaking changes to existing APIs"
+        - label: "This feature would require changes to configuration format"
+        - label: "This feature could be implemented without breaking changes"
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: "Contribution"
+      description: "Are you willing to contribute to implementing this feature?"
+      options:
+        - label: "I would be willing to submit a pull request for this feature"
+        - label: "I can help with testing this feature"
+        - label: "I can help with documentation for this feature"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: "Additional Context"
+      description: "Any additional context, mockups, examples, or references"
+      placeholder: "Links to similar features, academic papers, examples..."
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: "Legal and Ethical Use"
+      description: "Please confirm this feature request relates to legitimate academic use"
+      options:
+        - label: "This feature request supports legitimate academic research use only"
+          required: true

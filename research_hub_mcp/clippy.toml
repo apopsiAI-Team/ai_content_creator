@@ -1,0 +1,16 @@
+# Clippy configuration for rust-sci-hub-mcp
+
+# Set the threshold for the too_many_arguments lint
+too-many-arguments-threshold = 8
+
+# Set the threshold for the type_complexity lint  
+type-complexity-threshold = 250
+
+# Set the threshold for the cognitive_complexity lint
+cognitive-complexity-threshold = 30
+
+# Avoid triggering on TODO comments in development
+# allow-todo-comments = true
+
+# Disallowed names to avoid
+disallowed-names = ["foo", "bar", "baz", "quux"]
