@@ -83,13 +83,17 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
     if header.get("alg") != "HS256":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token algorithm")
-    if payload.get("iss") != settings.jwt_issuer:
+    if settings.jwt_validate_issuer and payload.get("iss") != settings.jwt_issuer:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token issuer")
     if payload.get("role") not in ALLOWED_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid role")
-    if not payload.get("sub") or not payload.get("email"):
+    if not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
-    if int(payload.get("exp", 0)) < int(time.time()):
+    try:
+        expires_at = int(payload.get("exp", 0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token expiration") from exc
+    if expires_at < int(time.time()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
 
     return payload

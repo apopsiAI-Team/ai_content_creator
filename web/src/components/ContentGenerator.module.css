@@ -344,6 +344,44 @@
   transform: translateY(-1px);
 }
 
+.platformExportButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--burnt-sienna);
+  color: white;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 6px;
+  margin-left: var(--space-sm);
+  transition: all var(--transition-fast);
+}
+
+.platformExportButton:hover:not(:disabled) {
+  background: var(--burnt-sienna-hover);
+  transform: translateY(-1px);
+}
+
+.platformExportButton:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.platformExportStatus {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.platformExportSuccess {
+  color: var(--sage);
+}
+
+.platformExportError {
+  color: var(--error-red);
+}
+
 .batchStatus,
 .batchStatusRejected {
   display: flex;

@@ -15,6 +15,7 @@ import {
   Edit3,
   CheckCircle2,
   RotateCcw,
+  UploadCloud,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { StructureConfig } from '../store/useStore';
@@ -29,7 +30,7 @@ const STRUCTURE_ELEMENTS: { key: keyof StructureConfig; label: string; hint?: st
   { key: 'in_text_citations', label: 'Ενδοκειμενικές αναφορές', hint: 'Αν απενεργοποιηθούν, οι ισχυρισμοί δεν τεκμηριώνονται ατομικά με (Επώνυμο, Έτος). Η Βιβλιογραφία παραμένει.' },
 ];
 import { generateWithStreaming, generateSkillCoverageReview } from '../services/claudeService';
-import { generateSummary } from '../services/api';
+import { exportGeneratedMaterialToPlatform, generateSummary } from '../services/api';
 import { exportToWord } from '../utils/wordExport';
 import { SkillCoverageReview } from './SkillCoverageReview';
 import { BatchFeedbackDialog } from './BatchFeedbackDialog';
@@ -108,6 +109,9 @@ export function ContentGenerator() {
   const [showReview, setShowReview] = useState(false);
   const [feedbackDialogBatch, setFeedbackDialogBatch] = useState<number | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isExportingPlatform, setIsExportingPlatform] = useState(false);
+  const [platformExportMessage, setPlatformExportMessage] = useState('');
+  const [platformExportStatus, setPlatformExportStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const contentRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -292,6 +296,71 @@ export function ContentGenerator() {
       summary: selectedModule ? (moduleSummaries[selectedModule] || '') : '',
     });
   }, [module, moduleBatches, documentTitle, currentReview, selectedModule, moduleSummaries]);
+
+  const handlePlatformExport = useCallback(async () => {
+    if (!module || !selectedModule) return;
+
+    const approvedBatches = moduleBatches.filter((b) => b.status === 'approved');
+    if (approvedBatches.length === 0) {
+      setPlatformExportStatus('error');
+      setPlatformExportMessage('Δεν υπάρχει εγκεκριμένο υλικό για αποστολή.');
+      return;
+    }
+
+    const allReferences = approvedBatches.flatMap((batch) => batch.references || []);
+    const data: Record<string, unknown> = {
+      source: 'ai-content',
+      export_type: 'educational_material',
+      exported_at: new Date().toISOString(),
+      course_title: documentTitle || module.title,
+      module: {
+        number: module.number,
+        title: module.title,
+        hours: module.hours,
+        content: module.content,
+        activities: module.activities,
+        skills: module.skills,
+      },
+      statistics: {
+        total_batches: approvedBatches.length,
+        total_pages: approvedBatches.reduce((sum, batch) => sum + batch.pageCount, 0),
+        total_references: allReferences.length,
+        total_skills: module.skills.length,
+      },
+      batches: approvedBatches.map((batch) => ({
+        batch_number: batch.batchNumber,
+        page_count: batch.pageCount,
+        content: batch.content,
+        references: batch.references,
+      })),
+      summary: moduleSummaries[selectedModule] || '',
+      skill_review: currentReview || null,
+      metadata: {
+        workflow_mode: workflowMode,
+        content_mode: contentMode,
+        model_provider: modelProvider,
+        task_id: currentTaskId || null,
+      },
+    };
+
+    setIsExportingPlatform(true);
+    setPlatformExportStatus('idle');
+    setPlatformExportMessage('');
+
+    try {
+      await exportGeneratedMaterialToPlatform(data);
+      setPlatformExportStatus('success');
+      setPlatformExportMessage('Το υλικό στάλθηκε στην πλατφόρμα.');
+    } catch (error) {
+      console.error('Platform export error:', error);
+      const msg = error instanceof Error ? error.message : 'Η αποστολή στην πλατφόρμα απέτυχε.';
+      setPlatformExportStatus('error');
+      setPlatformExportMessage(msg);
+      useStore.getState().setError(msg);
+    } finally {
+      setIsExportingPlatform(false);
+    }
+  }, [module, selectedModule, moduleBatches, documentTitle, moduleSummaries, currentReview, workflowMode, contentMode, modelProvider, currentTaskId]);
 
   const handleApproveAndFinish = useCallback(
     async (batchNumber: number) => {
@@ -661,6 +730,19 @@ export function ContentGenerator() {
                 <FileDown size={16} />
                 Τελικό Export
               </button>
+              <button
+                onClick={handlePlatformExport}
+                className={styles.platformExportButton}
+                disabled={isExportingPlatform}
+              >
+                {isExportingPlatform ? <Loader2 size={16} className={styles.spinner} /> : <UploadCloud size={16} />}
+                {isExportingPlatform ? 'Αποστολή...' : 'Αποστολή στην πλατφόρμα'}
+              </button>
+              {platformExportMessage && (
+                <span className={`${styles.platformExportStatus} ${platformExportStatus === 'success' ? styles.platformExportSuccess : styles.platformExportError}`}>
+                  {platformExportMessage}
+                </span>
+              )}
             </motion.div>
           )}
 

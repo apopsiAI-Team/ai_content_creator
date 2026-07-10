@@ -1,135 +1,111 @@
 # JWT Integration Guide - AI Content Creator Server Version
 
-This guide documents the current JWT integration for the app hosted at:
+This guide documents the agreed JWT integration for:
 
 ```text
 https://apopsi-ai.apopsi.gr/ai-content/
 ```
 
-The app is part of a broader e-mentoring platform. User management remains in the e-mentoring platform. The AI Content app does not implement its own login UI.
+The AI Content app is part of the broader e-mentoring platform. User management remains in the e-mentoring platform. The AI Content app does not implement its own login UI.
 
-## Current State
+## Current Decision
 
-JWT support has been added, but enforcement is disabled by default so existing production usage is not interrupted.
+The e-mentoring platform issues the JWT.
 
-```env
-JWT_AUTH_ENABLED=false
+AI Content does not need to mint the production login token. It verifies the token that arrives in the URL and then protects API calls with:
+
+```http
+Authorization: Bearer <jwt>
 ```
 
-With this setting, all existing app functionality continues to work without a token. The JWT mint endpoint is available for integration testing.
+The old AI Content mint endpoint can remain available as a legacy/test endpoint, but it is not the primary production flow.
 
-When the platform integration is ready, enforcement can be enabled by changing:
-
-```env
-JWT_AUTH_ENABLED=true
-```
-
-and restarting the backend service:
-
-```bash
-sudo systemctl restart edu-backend
-```
-
-## Authentication Flow
-
-The agreed flow is server-to-server token minting:
+## Production Flow
 
 ```text
 1. User logs in to the e-mentoring platform.
 2. User clicks the AI Content link inside the platform.
-3. The e-mentoring backend calls the AI Content backend server-to-server.
-4. AI Content verifies X-Platform-Secret.
-5. AI Content mints an HS256 JWT valid for 8 hours.
-6. AI Content returns a URL containing ?token=...
-7. The e-mentoring platform redirects the browser to that URL.
-8. The frontend stores the token in sessionStorage and removes it from the browser URL.
-9. Subsequent API calls send Authorization: Bearer <token>.
+3. The e-mentoring platform creates an HS256 JWT for that user.
+4. The platform redirects the browser to:
+   https://apopsi-ai.apopsi.gr/ai-content/?token=<JWT>
+5. The frontend stores the token in sessionStorage.
+6. The frontend removes ?token=... from the browser URL.
+7. Subsequent API calls include Authorization: Bearer <JWT>.
+8. The AI Content backend verifies the JWT signature, expiry, user id, and role.
 ```
+
+## Shared Secret
+
+Because the algorithm is HS256, both systems must use the same signing secret.
+
+The platform uses the secret to sign the token. AI Content uses the same secret to verify the token.
+
+The secret must never be exposed in frontend JavaScript, URLs, Postman collections, GitHub, screenshots, or public documentation. It belongs only in backend/server configuration.
 
 ## Environment Variables
 
-These values live in:
+These values live on the server in:
 
 ```text
 /home/yiannis-apopsi/apps/ai_material_creator_v2/.env
 ```
 
-Required JWT settings:
+Recommended JWT settings for the platform-issued-token flow:
 
 ```env
 JWT_AUTH_ENABLED=false
-JWT_SIGNING_SECRET=<random-secret-used-to-sign-ai-content-jwts>
-JWT_PLATFORM_SECRET=<shared-secret-used-by-e-mentoring-server-to-call-mint>
+JWT_SIGNING_SECRET=<shared-hs256-secret-from-platform>
+JWT_VALIDATE_ISSUER=false
 JWT_ISSUER=apopsi-ai
-JWT_EXPIRE_HOURS=8
 APP_PUBLIC_URL=https://apopsi-ai.apopsi.gr/ai-content/
 ```
 
-Do not commit `.env`. It is already ignored by `.gitignore`.
+Notes:
 
-Generate fresh secrets with:
+- Keep `JWT_AUTH_ENABLED=false` until the platform redirect has been tested end to end.
+- `JWT_SIGNING_SECRET` must match the secret used by the e-mentoring platform to sign JWTs.
+- `JWT_VALIDATE_ISSUER=false` means the backend does not require an `iss` claim.
+- If the platform later adds a stable issuer claim, set `JWT_VALIDATE_ISSUER=true` and set `JWT_ISSUER` to that exact value.
+- `JWT_PLATFORM_SECRET` and `JWT_EXPIRE_HOURS` are only relevant to the legacy `/api/auth/mint` endpoint.
+
+After `.env` changes, restart the backend:
 
 ```bash
-openssl rand -hex 32
-openssl rand -hex 32
+sudo systemctl restart edu-backend
 ```
 
-Use different values for `JWT_SIGNING_SECRET` and `JWT_PLATFORM_SECRET`.
+## JWT Header
 
-## Mint Endpoint
-
-The e-mentoring platform calls:
-
-```http
-POST https://apopsi-ai.apopsi.gr/ai-content/api/auth/mint
-Content-Type: application/json
-X-Platform-Secret: <JWT_PLATFORM_SECRET>
-```
-
-Request body:
+The platform token header should be:
 
 ```json
 {
-  "sub": "4821",
-  "email": "user@example.com",
-  "role": "internal_employee"
+  "alg": "HS256",
+  "typ": "JWT"
 }
 ```
 
-Response body:
-
-```json
-{
-  "url": "https://apopsi-ai.apopsi.gr/ai-content/?token=JWT_HERE",
-  "expires_at": "2026-06-17T15:02:11Z"
-}
-```
-
-The platform should redirect the user to the `url` value.
+`HS256` means the token is signed with a shared secret.
 
 ## JWT Payload
 
-The minted token contains this payload shape:
+The agreed platform payload shape is:
 
 ```json
 {
-  "sub": "4821",
-  "email": "user@example.com",
+  "sub": "38B3CCA1-D6A4-4037-95EF-BCA03FFA3AA8",
+  "name": "System Administrator",
   "role": "internal_employee",
-  "iss": "apopsi-ai",
-  "iat": 1781679731,
-  "exp": 1781708531
+  "exp": 1783538196
 }
 ```
 
 Claim meanings:
 
 - `sub`: stable unique user id from the e-mentoring platform.
-- `email`: user email from the e-mentoring platform.
+- `name`: display name from the e-mentoring platform. Useful for future exports/auditing, but not currently required for access.
 - `role`: authorization role for this app.
-- `iss`: token issuer. Currently `apopsi-ai`.
-- `iat`: issued-at Unix timestamp.
-- `exp`: expiration Unix timestamp.
+- `exp`: expiration as Unix timestamp in seconds.
 
 Allowed roles:
 
@@ -138,54 +114,36 @@ internal_employee
 external_partner
 ```
 
-## Protected Endpoints
-
-The JWT dependency is connected to the main production API routers. While `JWT_AUTH_ENABLED=false`, the dependency does not block requests.
-
-When `JWT_AUTH_ENABLED=true`, these endpoints require:
-
-```http
-Authorization: Bearer <jwt>
-```
-
-Protected endpoint groups:
+Currently required by AI Content:
 
 ```text
-GET  /api/research/search
-POST /api/generate
-POST /api/generate-stream
-POST /api/generate-summary
-POST /api/generate-bibliography
-POST /api/review
-POST /api/claude/generate
-POST /api/claude/generate-stream
-POST /api/parse-docx
-POST /api/docx-to-markdown
-GET  /api/rate-limit/status
+sub
+role
+exp
 ```
 
-Public endpoints:
+Currently optional:
 
 ```text
-GET  /api/health
-POST /api/auth/mint
+name
+iss
+iat
+email
 ```
 
-`POST /api/auth/mint` is public only in the JWT sense. It is protected by:
+## Login URL
 
-```http
-X-Platform-Secret: <JWT_PLATFORM_SECRET>
+The platform should redirect the browser to:
+
+```text
+https://apopsi-ai.apopsi.gr/ai-content/?token=<JWT>
 ```
+
+Do not call this URL server-to-server. It is a browser redirect target.
 
 ## Frontend Behavior
 
-The frontend handles links like:
-
-```text
-https://apopsi-ai.apopsi.gr/ai-content/?token=JWT_HERE
-```
-
-On load it:
+On load, the frontend:
 
 ```text
 1. Reads token from the URL.
@@ -200,172 +158,127 @@ If enforcement is enabled and a request receives `401`, the user sees:
 Δεν υπάρχει ενεργή πρόσβαση. Παρακαλώ ανοίξτε το εργαλείο μέσα από την πλατφόρμα e-mentoring.
 ```
 
-No redirect is currently implemented. Redirect can be added later when the platform URL is finalized.
-
-## Implementation Files
-
-Backend:
+If a request receives `403`, the user sees:
 
 ```text
-backend_py/src/edu_backend/auth.py
-backend_py/src/edu_backend/routers/auth.py
-backend_py/src/edu_backend/config.py
-backend_py/src/edu_backend/main.py
-backend_py/src/edu_backend/routers/generate.py
-backend_py/src/edu_backend/routers/claude.py
-backend_py/src/edu_backend/routers/docx.py
+Ο λογαριασμός σας δεν έχει δικαίωμα πρόσβασης σε αυτό το εργαλείο.
 ```
 
-Frontend:
+## Protected Endpoints
+
+While `JWT_AUTH_ENABLED=false`, the dependency does not block requests.
+
+When `JWT_AUTH_ENABLED=true`, these endpoint groups require:
+
+```http
+Authorization: Bearer <jwt>
+```
+
+Protected endpoint groups:
 
 ```text
-web/src/services/api.ts
-web/src/App.tsx
+POST /api/generate...
+POST /api/claude...
+POST /api/docx...
+GET  /api/rate-limit/status
 ```
 
-## Verification Commands
+Public endpoints:
 
-Run from the server:
-
-```bash
-cd /home/yiannis-apopsi/apps/ai_material_creator_v2
+```text
+GET  /api/health
+POST /api/auth/mint       legacy/test only
 ```
 
-Health check through local nginx HTTPS:
+## Legacy Mint Endpoint
+
+The old endpoint still exists:
+
+```http
+POST https://apopsi-ai.apopsi.gr/ai-content/api/auth/mint
+Content-Type: application/json
+X-Platform-Secret: <JWT_PLATFORM_SECRET>
+```
+
+This endpoint lets AI Content mint a token itself. It is no longer the preferred production flow.
+
+Use it only for legacy compatibility or controlled local testing.
+
+## Testing With a Platform Token
+
+After the platform generates a JWT, test from the server:
 
 ```bash
+TOKEN="JWT_FROM_PLATFORM"
+
 curl -sS --resolve apopsi-ai.apopsi.gr:443:127.0.0.1 \
-  https://apopsi-ai.apopsi.gr/ai-content/api/health
+  -H "Authorization: Bearer $TOKEN" \
+  https://apopsi-ai.apopsi.gr/ai-content/api/rate-limit/status
 ```
 
-Mint token test:
+Expected result when the token is valid and `JWT_AUTH_ENABLED=true`:
 
-```bash
-curl -sS -X POST \
-  --resolve apopsi-ai.apopsi.gr:443:127.0.0.1 \
-  https://apopsi-ai.apopsi.gr/ai-content/api/auth/mint \
-  -H 'Content-Type: application/json' \
-  -H 'X-Platform-Secret: <JWT_PLATFORM_SECRET>' \
-  -d '{"sub":"123","email":"user@example.com","role":"internal_employee"}'
+```text
+HTTP 200 / JSON response
 ```
 
-Expected response contains:
+Common failures:
 
-```json
-{
-  "url": "https://apopsi-ai.apopsi.gr/ai-content/?token=...",
-  "expires_at": "..."
-}
+```text
+401 Invalid token             wrong secret, malformed token, or bad signature
+401 Token expired             exp is in the past
+401 Missing bearer token      frontend did not send Authorization header
+401 Invalid token expiration  exp is missing or not numeric
+403 Invalid role              role is not internal_employee or external_partner
 ```
 
-Frontend build:
+## Enabling Enforcement
 
-```bash
-cd /home/yiannis-apopsi/apps/ai_material_creator_v2/web
-VITE_BASE_PATH=/ai-content/ VITE_API_URL=/ai-content npm run build
+Enable only after the platform redirect URL has been tested with a real token.
+
+1. Keep the current app running with `JWT_AUTH_ENABLED=false`.
+2. Ask the platform to generate a test token and redirect URL.
+3. Open the URL in a browser:
+
+```text
+https://apopsi-ai.apopsi.gr/ai-content/?token=<JWT>
 ```
 
-Deploy frontend build:
-
-```bash
-cd /home/yiannis-apopsi/apps/ai_material_creator_v2
-sudo rsync -a --delete web/dist/ /var/www/apopsi-ai/ai-content/
-sudo systemctl restart edu-backend
-```
-
-## Enabling JWT Enforcement
-
-Only do this after the e-mentoring platform can mint links successfully.
-
-1. Edit `.env`:
+4. Confirm that the frontend loads and API calls include `Authorization: Bearer`.
+5. Change `.env`:
 
 ```env
 JWT_AUTH_ENABLED=true
 ```
 
-2. Restart backend:
+6. Restart backend:
 
 ```bash
 sudo systemctl restart edu-backend
 ```
 
-3. Test direct access without token. Frontend should load, but protected API calls should fail with a clear access message.
+7. Test direct access without token. API calls should fail with a clear access message.
+8. Test access through the platform URL. API calls should succeed.
 
-4. Test access through a minted URL. API calls should succeed with `Authorization: Bearer <token>`.
+## Operational Rollback
 
-## Immediate Rollback
-
-Fast rollback without changing code:
+Fast rollback:
 
 ```env
 JWT_AUTH_ENABLED=false
 ```
 
-Then restart:
+Then:
 
 ```bash
 sudo systemctl restart edu-backend
 ```
 
-This disables JWT enforcement and returns API access to the pre-enforcement behavior.
+This returns protected API access to the pre-enforcement behavior.
 
-## Code Rollback
+## Export Back To Platform
 
-If the JWT code itself must be removed, revert the JWT commit from git after this repository is pushed.
+This JWT flow is only for access to AI Content.
 
-Check history:
+Sending generated material back to the e-mentoring platform is a separate integration. The platform has provided an import endpoint using Basic Auth. AI Content should call that endpoint server-to-server when export is implemented.
 
-```bash
-git log --oneline
-```
-
-Revert a specific commit:
-
-```bash
-git revert <commit-sha>
-```
-
-Push rollback:
-
-```bash
-git push
-```
-
-Because the initial repository commit includes the current codebase, the safest operational rollback remains `JWT_AUTH_ENABLED=false` unless a code-level issue is found.
-
-## Future Alternative: Platform-Issued JWT
-
-If the e-mentoring platform later wants to issue the JWT itself, the frontend flow can remain the same:
-
-```text
-https://apopsi-ai.apopsi.gr/ai-content/?token=...
-```
-
-and API calls can keep using:
-
-```http
-Authorization: Bearer <token>
-```
-
-For HS256, both systems must share the same signing secret. The AI Content backend would verify platform-issued tokens instead of using `/api/auth/mint`.
-
-The payload should remain compatible:
-
-```json
-{
-  "sub": "4821",
-  "email": "user@example.com",
-  "role": "internal_employee",
-  "iss": "e-mentoring",
-  "iat": 1781679731,
-  "exp": 1781708531
-}
-```
-
-Then update `.env` accordingly:
-
-```env
-JWT_ISSUER=e-mentoring
-```
-
-`/api/auth/mint` can remain available or be retired later.

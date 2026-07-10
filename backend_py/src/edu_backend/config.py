@@ -36,8 +36,17 @@ class Settings(BaseSettings):
     jwt_signing_secret: str = ""
     jwt_platform_secret: str = ""
     jwt_issuer: str = "apopsi-ai"
+    jwt_validate_issuer: bool = False
     jwt_expire_hours: int = 8
     app_public_url: str = "https://apopsi-ai.apopsi.gr/ai-content/"
+
+    # Optional server-to-server export back to the e-mentoring platform.
+    platform_export_enabled: bool = False
+    platform_export_url: str = ""
+    platform_export_username: str = ""
+    platform_export_password: str = ""
+    platform_export_auth_header: str = ""
+    platform_export_timeout_seconds: float = 30.0
 
 
 settings = Settings()

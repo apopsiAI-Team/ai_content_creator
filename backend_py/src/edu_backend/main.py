@@ -11,7 +11,7 @@ from pathlib import Path
 env_path = Path(__file__).parent.parent.parent.parent / ".env"
 load_dotenv(env_path)
 
-from .routers import health, generate, claude, docx, auth
+from .routers import health, generate, claude, docx, auth, export
 from .config import settings
 from .auth import require_jwt
 
@@ -45,6 +45,7 @@ app.include_router(auth.router)
 app.include_router(generate.router)
 app.include_router(claude.router)
 app.include_router(docx.router)
+app.include_router(export.router)
 
 
 @app.get("/api/rate-limit/status", dependencies=[Depends(require_jwt)])

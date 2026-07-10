@@ -433,3 +433,23 @@ export async function reviewSkillCoverage(
 
   return response.json();
 }
+
+export interface PlatformExportResponse {
+  status: 'ok';
+  platform_status: number;
+  platform_response: unknown;
+}
+
+export async function exportGeneratedMaterialToPlatform(data: Record<string, unknown>): Promise<PlatformExportResponse> {
+  const response = await fetch(apiUrl('/api/export/platform'), {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify({ data }),
+  });
+
+  if (!response.ok) {
+    throw await apiError(response);
+  }
+
+  return response.json();
+}
