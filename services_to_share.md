@@ -70,7 +70,7 @@ body["document_id"] = documentId;
 {
   "status": "ok",
   "has_api_key": true,
-  "model": "claude-opus-4-6",
+  "model": "claude-opus-5",
   "research_hub_available": true,
   "esco_data_available": true
 }
@@ -350,7 +350,7 @@ curl -N -X POST http://localhost:8001/api/generate-stream \
 | `previous_content` | string | Όχι | "" | Περιεχόμενο προηγούμενων batches (αποφυγή επανάληψης) |
 | `batch_number` | int | Όχι | 1 | Τρέχον batch |
 | `total_batches` | int | Όχι | 1 | Εκτιμώμενος συνολικός αριθμός batches |
-| `model_provider` | `"claude"` \| `"openai"` | Όχι | `"claude"` | Επιλογή LLM provider — Claude Opus 4.6 ή OpenAI gpt-5.4 |
+| `model_provider` | `"claude"` \| `"openai"` | Όχι | `"claude"` | Επιλογή LLM provider — Claude Opus 5 ή OpenAI gpt-5.6-sol |
 | `mode` | `"generate"` \| `"revision"` | Όχι | `"generate"` | Λειτουργία: `generate` = παραγωγή νέου τμήματος, `revision` = στοχευμένη αναθεώρηση υπάρχοντος draft |
 | `current_draft` | string | Όχι (απαιτείται σε `revision`) | "" | Το υπάρχον batch content που θα αναθεωρηθεί |
 | `document_id` | string | Όχι | "" | Σταθερό correlation id ανά uploaded doc/draft session — εμφανίζεται στα backend logs για διάκριση πολλαπλών users που δουλεύουν στο ίδιο αρχείο |

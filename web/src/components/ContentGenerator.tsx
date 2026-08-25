@@ -97,6 +97,7 @@ export function ContentGenerator() {
     clearQueueStatus,
     reset,
     currentTaskId,
+    platformClientContext,
   } = useStore();
 
   const isEscoMode = workflowMode === 'esco';
@@ -335,6 +336,7 @@ export function ContentGenerator() {
       })),
       summary: moduleSummaries[selectedModule] || '',
       skill_review: currentReview || null,
+      ...(platformClientContext !== null ? { clientContext: platformClientContext } : {}),
       metadata: {
         workflow_mode: workflowMode,
         content_mode: contentMode,
@@ -360,7 +362,7 @@ export function ContentGenerator() {
     } finally {
       setIsExportingPlatform(false);
     }
-  }, [module, selectedModule, moduleBatches, documentTitle, moduleSummaries, currentReview, workflowMode, contentMode, modelProvider, currentTaskId]);
+  }, [module, selectedModule, moduleBatches, documentTitle, moduleSummaries, currentReview, workflowMode, contentMode, modelProvider, currentTaskId, platformClientContext]);
 
   const handleApproveAndFinish = useCallback(
     async (batchNumber: number) => {

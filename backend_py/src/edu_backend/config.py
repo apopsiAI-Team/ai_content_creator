@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     # Model settings
     # `model_id` is the Anthropic (Claude) model — kept as the original setting name
     # for backwards compatibility with existing code paths.
-    model_id: str = "claude-opus-4-6"
-    openai_model_id: str = "gpt-5.4"
+    model_id: str = "claude-opus-5"
+    openai_model_id: str = "gpt-5.6-sol"
     max_tokens: int = 64000  # Max output tokens per API call (~30K typical, 64K cap)
 
     # Rate limiting — Anthropic API tier (2, 3, or 4)

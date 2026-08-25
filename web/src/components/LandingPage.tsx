@@ -294,7 +294,7 @@ export function LandingPage() {
                             </span>
                             <span className={styles.pendingItemMetaPart}>
                               {task.modelProvider === 'openai' ? <Zap size={13} /> : <Cpu size={13} />}
-                              {task.modelProvider === 'openai' ? 'GPT-5.4' : 'Claude'}
+                              {task.modelProvider === 'openai' ? 'GPT-5.6-sol' : 'Claude'}
                             </span>
                           </div>
                         </div>
@@ -460,14 +460,14 @@ export function LandingPage() {
                     onClick={() => setModelProvider('claude')}
                   >
                     <Cpu size={16} />
-                    Claude Opus 4.6
+                    Claude Opus 5
                   </button>
                   <button
                     className={`${styles.modeButton} ${modelProvider === 'openai' ? styles.modeButtonActive : ''}`}
                     onClick={() => setModelProvider('openai')}
                   >
                     <Zap size={16} />
-                    GPT-5.4
+                    GPT-5.6-sol
                   </button>
                 </div>
               </div>

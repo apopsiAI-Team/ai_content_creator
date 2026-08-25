@@ -412,7 +412,7 @@ git show --name-only --pretty=format: 4d9cc54 | grep -v '^$' | \
 
 ### Smoke checks
 
-- `GET /api/health` → 200, ίδιο `model: claude-opus-4-6`.
+- `GET /api/health` → 200, ίδιο `model: claude-opus-5`.
 - **Logging με correlation ids** — μετά από οποιοδήποτε API call:
   ```bash
   ssh $SERVER 'docker compose logs --tail=20 deploy-api-1 | grep "^\[api\]"'
@@ -496,7 +496,7 @@ git show --name-only --pretty=format: 70a499c | grep -v '^$' | \
 
 ### Smoke checks
 
-- `GET /api/health` → 200, ίδιο `model: claude-opus-4-6`.
+- `GET /api/health` → 200, ίδιο `model: claude-opus-5`.
 - Στο UI: tab bar στο Landing πρέπει να δείχνει **3 tabs** (Standard / ESCO Integrated / **Επεξεργασία υλικού**).
 - Παραγωγή τμήματος → πάτησε «Αλλαγές» με συγκεκριμένη οδηγία → το αναθεωρημένο κείμενο πρέπει να έχει αλλάξει **μόνο** εκεί που ζητήθηκε. Συγκριτική επιβεβαίωση: σώσε το αρχικό content, κάνε diff μετά την αναθεώρηση.
 - Upload-docx flow: tab «Επεξεργασία υλικού» → ανέβασε `.docx` (κατά προτίμηση παραγμένο από το app) → πρέπει να σε πάει στο ContentGenerator με pending batch το ίδιο το ανεβασμένο κείμενο.

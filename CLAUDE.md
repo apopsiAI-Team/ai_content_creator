@@ -90,7 +90,7 @@ Inside any workflow, the prompt path is selected by `contentMode`:
 
 ### Backend layout (`backend_py/src/edu_backend/`)
 - `main.py` — FastAPI app, CORS allowlist (5173 / 4173 only), startup banner, Rust hub health probe, rate-limit status endpoint
-- `config.py` — `Settings` (pydantic): **`model_id = "claude-opus-4-6"`**, `max_tokens = 64000`, `anthropic_tier = 2`, `rust_research_hub_url = http://localhost:8091`
+- `config.py` — `Settings` (pydantic): **`model_id = "claude-opus-5"`**, `max_tokens = 64000`, `anthropic_tier = 2`, `rust_research_hub_url = http://localhost:8091`
 - `rate_limiter.py` — Semaphore-based concurrency control + sliding-window token tracker; tier-aware (2/3/4); `Priority.HEAVY` (content gen) vs `Priority.LIGHT` (summary/bibliography/review); per-user caps; emits queue position to frontend
 - `services/claude_service.py` — All Anthropic calls. Prompts cached via `cache_control: ephemeral` (90% cost reduction, ~5 min TTL). Stream retries with exponential backoff + jitter for 429/5xx/overload.
 - `services/research_service.py` — CrossRef + Rust hub queries; thesis/dissertation filtering; English keyword translation for Greek-language queries
@@ -140,7 +140,7 @@ VITE_API_URL=http://localhost:8000   # default: same-origin
 
 ## Content Generation Notes
 
-- **Model:** `claude-opus-4-6` (set in `backend_py/.../config.py`). Streaming via `client.messages.stream`; non-stream paths use `client.messages.create`.
+- **Model:** `claude-opus-5` (set in `backend_py/.../config.py`). Streaming via `client.messages.stream`; non-stream paths use `client.messages.create`.
 - **Prompt caching:** every system prompt is wrapped via `_cacheable_system()` with `cache_control: {"type": "ephemeral"}`.
 - **Per-batch sections:** Σκοπός → Προσδοκώμενα → Λέξεις Κλειδιά → (Εισαγωγή only batch 1) → Υποενότητες → MCQs → Βιβλιογραφία → Γλωσσάρι.
 - **Dynamic MCQ count:** 20 total per module, distributed proportionally across batches (`per_batch = max(5, 20 // total_batches + ...)`); single-batch always gets 20.

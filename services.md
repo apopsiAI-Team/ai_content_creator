@@ -4,7 +4,7 @@
 **Base URL:** `https://devai.apopsi.gr/e-learning` (production) | `http://localhost:8000` (local)
 **Όλα τα endpoints** ξεκινούν με `/api/`
 
-> **Multi-provider:** Από το 2026-04-29 όλα τα `POST` endpoints παραγωγής δέχονται προαιρετικό πεδίο `model_provider: "claude" | "openai"` (default `"claude"`). Όταν είναι `"openai"`, η ίδια λογική εκτελείται μέσω OpenAI **gpt-5.4** αντί Claude Opus 4.6, με ίδια system prompts και preconditions.
+> **Multi-provider:** Από το 2026-04-29 όλα τα `POST` endpoints παραγωγής δέχονται προαιρετικό πεδίο `model_provider: "claude" | "openai"` (default `"claude"`). Όταν είναι `"openai"`, η ίδια λογική εκτελείται μέσω OpenAI **gpt-5.6-sol** αντί Claude Opus 5, με ίδια system prompts και preconditions.
 
 > **Session header:** Το frontend στέλνει σε όλες τις κλήσεις τον header `X-Session-ID: <uuid>` (stable per user-session, όχι per request) που χρησιμοποιείται από τον rate limiter για per-user budgeting. Αν λείπει, ο backend κάνει fallback σε hash του client IP — που σημαίνει shared bucket για όλους τους users πίσω από το ίδιο NAT/proxy. Δες παρακάτω «Session & document correlation» για οδηγίες.
 
@@ -65,7 +65,7 @@ Health check — ελέγχει αν το backend είναι ενεργό και
 {
   "status": "ok",
   "has_api_key": true,
-  "model": "claude-opus-4-6",
+  "model": "claude-opus-5",
   "research_hub_available": true,
   "esco_data_available": true
 }
@@ -75,7 +75,7 @@ Health check — ελέγχει αν το backend είναι ενεργό και
 |-------|-------|-----------|
 | `status` | string | Πάντα `"ok"` αν ο server τρέχει |
 | `has_api_key` | bool | Αν υπάρχει Anthropic API key |
-| `model` | string | Μοντέλο Claude που χρησιμοποιείται (default `claude-opus-4-6`) |
+| `model` | string | Μοντέλο Claude που χρησιμοποιείται (default `claude-opus-5`) |
 | `research_hub_available` | bool | Αν ο Rust Research Hub είναι διαθέσιμος |
 | `esco_data_available` | bool | Αν τα δεδομένα ESCO (ελληνικά) είναι φορτωμένα |
 
@@ -118,7 +118,7 @@ Health check — ελέγχει αν το backend είναι ενεργό και
 | `semaphore.active_heavy` | Πόσες παραγωγές υλικού τρέχουν αυτή τη στιγμή |
 | `semaphore.queue_heavy` | Πόσες περιμένουν στην ουρά |
 
-> **Provider-agnostic:** Ο rate limiter παρακολουθεί συνολικά tokens ανεξαρτήτως provider. Τα `TIER_CONFIGS` είναι σχηματισμένα για Anthropic Tier 2 (90 K OTPM). Όταν χρησιμοποιείται OpenAI gpt-5.4 ταυτόχρονα, καταγράφεται στο ίδιο budget — δεν υπάρχει per-provider tracking.
+> **Provider-agnostic:** Ο rate limiter παρακολουθεί συνολικά tokens ανεξαρτήτως provider. Τα `TIER_CONFIGS` είναι σχηματισμένα για Anthropic Tier 2 (90 K OTPM). Όταν χρησιμοποιείται OpenAI gpt-5.6-sol ταυτόχρονα, καταγράφεται στο ίδιο budget — δεν υπάρχει per-provider tracking.
 
 ---
 
@@ -207,7 +207,7 @@ GET /api/research/search?query=διοίκηση ολικής ποιότητας&
 | `previous_content` | string | Όχι | "" | Περιεχόμενο προηγούμενων batches (αποφυγή επανάληψης) |
 | `batch_number` | int | Όχι | 1 | Τρέχον batch |
 | `total_batches` | int | Όχι | 1 | Εκτιμώμενος συνολικός αριθμός batches |
-| `model_provider` | `"claude"` \| `"openai"` | Όχι | `"claude"` | Επιλογή LLM provider — Claude Opus 4.6 ή OpenAI gpt-5.4 |
+| `model_provider` | `"claude"` \| `"openai"` | Όχι | `"claude"` | Επιλογή LLM provider — Claude Opus 5 ή OpenAI gpt-5.6-sol |
 | `mode` | `"generate"` \| `"revision"` | Όχι | `"generate"` | Λειτουργία: `generate` = κανονική παραγωγή, `revision` = στοχευμένη αναθεώρηση υπάρχοντος draft |
 | `current_draft` | string | Όχι (απαιτείται σε `revision`) | "" | Το υπάρχον batch content που θα αναθεωρηθεί. Στέλνεται ως assistant turn· το `user_instructions` περιγράφει τις στοχευμένες αλλαγές |
 | `document_id` | string | Όχι | "" | Optional correlation id (stable per uploaded doc/draft session) — εμφανίζεται στα backend logs για διάκριση πολλαπλών users |
@@ -662,15 +662,15 @@ Frontend                              Backend
 
 | `model_provider` | Μοντέλο | Context | Ρύθμιση |
 |------------------|---------|---------|---------|
-| `"claude"` (default) | `claude-opus-4-6` (`config.model_id`) | 200 K | `ANTHROPIC_API_KEY` |
-| `"openai"` | `gpt-5.4` (`config.openai_model_id`) | 1.1 M | `OPENAI_API_KEY` |
+| `"claude"` (default) | `claude-opus-5` (`config.model_id`) | 200 K | `ANTHROPIC_API_KEY` |
+| `"openai"` | `gpt-5.6-sol` (`config.openai_model_id`) | 1.1 M | `OPENAI_API_KEY` |
 
 **Παρατηρήσεις:**
 - **Ίδια system prompts** και ίδια business logic (continuation, retry, auto-continue, MCQ counts, ESCO review, summary, bibliography fallback) και στους δύο providers — η μόνη διαφορά είναι το raw streaming/completion call.
 - **Prompt caching:** Στο Claude path γίνεται explicit μέσω `cache_control: ephemeral`. Στο OpenAI path εφαρμόζεται **auto-caching** όταν το prefix είναι ≥1024 tokens (δεν χρειάζεται flag).
 - **Truncation detection:** Claude `stop_reason == "max_tokens"` ↔ OpenAI `finish_reason == "length"`. Και στις δύο περιπτώσεις ενεργοποιείται continuation.
 - **Token usage normalization:** OpenAI `prompt_tokens` / `completion_tokens` mapping σε `input_tokens` / `output_tokens` για τον rate limiter.
-- **Επιλογή provider:** Το frontend περνάει το `modelProvider` από το store (Landing Page toggle Claude Opus 4.6 / GPT-5.4). Επιβιώνει στο localStorage και αποθηκεύεται στα `pendingTasks` (Εκκρεμότητες).
+- **Επιλογή provider:** Το frontend περνάει το `modelProvider` από το store (Landing Page toggle Claude Opus 5 / GPT-5.6-sol). Επιβιώνει στο localStorage και αποθηκεύεται στα `pendingTasks` (Εκκρεμότητες).
 
 ---
 
@@ -713,7 +713,7 @@ Frontend                              Backend
 | Variable | Required | Default | Περιγραφή |
 |----------|----------|---------|-----------|
 | `ANTHROPIC_API_KEY` | Ναι (για `model_provider="claude"`) | — | Anthropic API key |
-| `OPENAI_API_KEY` | Ναι (για `model_provider="openai"`) | — | OpenAI API key (gpt-5.4) |
+| `OPENAI_API_KEY` | Ναι (για `model_provider="openai"`) | — | OpenAI API key (gpt-5.6-sol) |
 | `ANTHROPIC_TIER` | Όχι | `2` | Anthropic tier (2/3/4) — επηρεάζει concurrency caps |
 | `HOST` | Όχι | `0.0.0.0` | Host binding |
 | `PORT` | Όχι | `8000` | Port |

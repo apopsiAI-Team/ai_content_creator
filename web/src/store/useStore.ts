@@ -112,6 +112,7 @@ export interface PendingTask {
   skillReviews: Record<number, SkillCoverageReview>;
   productionComplete: Record<number, boolean>;
   moduleSummaries: Record<number, string>;
+  platformClientContext?: unknown | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -177,10 +178,12 @@ export interface AppState {
   // Pending tasks ("Εκκρεμότητες") — surface in Landing
   currentTaskId: string | null;
   pendingTasks: PendingTask[];
+  platformClientContext: unknown | null;
 
   // Actions
   setDocumentFile: (file: File | null) => void;
   setDocumentData: (title: string, modules: Module[], totalHours: number) => void;
+  setPlatformDocumentData: (title: string, modules: Module[], totalHours: number, selectedModule: number | null, clientContext: unknown | null) => void;
   setStandardModule: (title: string, hours: number, totalModulePages: number, targetPages: number, learningOutcomes: string, keywords: string, contentMode: 'standard' | 'experimental') => void;
   loadDocForEditing: (title: string, markdown: string) => void;
   setSelectedModule: (moduleNumber: number | null) => void;
@@ -247,6 +250,7 @@ const activeStateDefaults = {
   currentStep: 'upload' as const,
   error: null as string | null,
   currentTaskId: null as string | null,
+  platformClientContext: null as unknown | null,
 };
 
 const initialState = {
@@ -287,6 +291,7 @@ function snapshotTask(state: AppState, id: string, createdAt: number): PendingTa
     skillReviews: state.skillReviews,
     productionComplete: state.productionComplete,
     moduleSummaries: state.moduleSummaries,
+    platformClientContext: state.platformClientContext,
     createdAt,
     updatedAt: Date.now(),
   };
@@ -331,6 +336,22 @@ export const useStore = create<AppState>()(
         modules,
         totalHours,
         currentStep: 'modules',
+      })),
+
+      // Platform-start - same ESCO workflow, but seeded from JSON posted by
+      // the e-mentoring platform instead of a local .docx upload.
+      setPlatformDocumentData: (title, modules, totalHours, selectedModule, clientContext) => set((state) => ({
+        ...activeStateDefaults,
+        modelProvider: state.modelProvider,
+        pendingTasks: state.pendingTasks,
+        currentTaskId: makeTaskId(),
+        workflowMode: 'esco',
+        documentTitle: title,
+        modules,
+        totalHours,
+        selectedModule,
+        platformClientContext: clientContext,
+        currentStep: selectedModule ? 'generate' : 'modules',
       })),
 
       // Standard topic — start a brand-new task.
@@ -588,6 +609,7 @@ export const useStore = create<AppState>()(
           skillReviews: task.skillReviews,
           productionComplete: task.productionComplete,
           moduleSummaries: task.moduleSummaries,
+          platformClientContext: task.platformClientContext ?? null,
           currentStep: 'generate',
         };
       }),

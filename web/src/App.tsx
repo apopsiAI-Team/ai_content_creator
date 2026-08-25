@@ -5,14 +5,30 @@ import { LandingPage } from './components/LandingPage';
 import { ModuleList } from './components/ModuleList';
 import { ContentGenerator } from './components/ContentGenerator';
 import { initializeAuthFromUrl } from './services/api';
+import { consumePlatformStart } from './services/platformStart';
 import './App.css';
 
 function App() {
-  const { currentStep, error, setError } = useStore();
+  const { currentStep, error, setError, setPlatformDocumentData } = useStore();
 
   useEffect(() => {
     initializeAuthFromUrl();
-  }, []);
+    try {
+      const platformStart = consumePlatformStart();
+      if (platformStart) {
+        setPlatformDocumentData(
+          platformStart.title,
+          platformStart.modules,
+          platformStart.totalHours,
+          platformStart.selectedModule,
+          platformStart.clientContext
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Αποτυχία φόρτωσης δεδομένων από την πλατφόρμα.';
+      setError(message);
+    }
+  }, [setError, setPlatformDocumentData]);
 
   const pageVariants = {
     initial: { opacity: 0, x: 20 },
