@@ -28,6 +28,7 @@ from ..prompts.system_prompt import (
 from ..prompts.structure import (
     StructureConfig,
     build_system_prompt,
+    revision_config,
     build_structure_block,
     build_expand_prompt,
     build_final_reminder,
@@ -410,7 +411,8 @@ class LLMService(ABC):
         and changes between revisions, so message-level cache hits don't
         accrue across rounds — only the system prefix is cached.
         """
-        cfg = structure_config or StructureConfig()
+        # Elements the draft already has are kept; only adding disabled ones is forbidden.
+        cfg = revision_config(structure_config or StructureConfig(), current_draft)
         module_context = self._format_module(
             module,
             target_pages=target_pages,

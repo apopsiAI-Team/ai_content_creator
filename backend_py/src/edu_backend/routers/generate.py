@@ -10,7 +10,7 @@ import json
 import traceback
 
 from ..config import settings
-from ..prompts.structure import StructureConfig, detect_structure_violations
+from ..prompts.structure import StructureConfig, detect_structure_violations, revision_config
 from ..services.llm_service import get_llm_service
 from ..services.research_service import get_research_service
 from ..services.citation_verifier import verify_bibliography
@@ -261,7 +261,10 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
                 yield f"data: {json.dumps({'type': 'content', 'text': chunk})}\n\n"
 
             # Safety net: flag disabled structural elements the model added anyway.
-            violations = detect_structure_violations("".join(generated), structure_cfg)
+            # In a revision, elements the draft already had are not "added";
+            # elements the user asked for in the instructions are not "unrequested".
+            check_cfg = revision_config(structure_cfg, request.current_draft) if is_revision else structure_cfg
+            violations = detect_structure_violations("".join(generated), check_cfg, request.user_instructions)
             if violations:
                 _log_request(
                     "/api/generate-stream", user_id, request.document_id,

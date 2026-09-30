@@ -9,6 +9,7 @@ const STRUCTURE_LABELS: Record<string, string> = {
   self_assessment: 'Ερωτήσεις αυτοαξιολόγησης',
   glossary: 'Γλωσσάρι',
   subsection_keywords: 'Βασικές λέξεις ανά υποενότητα',
+  in_text_citations: 'Ενδοκειμενικές αναφορές',
 };
 
 const STATUS_LABELS: Record<BibliographyEntryCheck['status'], string> = {

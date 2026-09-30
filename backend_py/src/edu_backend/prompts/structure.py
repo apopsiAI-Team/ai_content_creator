@@ -34,7 +34,8 @@ from __future__ import annotations
 
 import itertools
 import re
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 
 from .system_prompt import (
     SYSTEM_PROMPT,
@@ -96,6 +97,8 @@ _REGIONS = {
         ("self_assessment", "## 3. ΕΡΩΤΗΣΕΙΣ ΑΥΤΟΑΞΙΟΛΟΓΗΣΗΣ", "Ακολουθεί ενότητα Απαντήσεων: 1. α, 2. β, κ.ο.κ."),
         ("glossary", "## 5. ΓΛΩΣΣΑΡΙ", "Αλφαβητική λίστα βασικών όρων που εισάγονται σε ΑΥΤΟ το τμήμα."),
         ("in_text_citations", "## ΥΠΟΧΡΕΩΤΙΚΕΣ IN-TEXT ΑΝΑΦΟΡΕΣ", "ΔΕΝ επιτρέπεται κείμενο χωρίς καμία βιβλιογραφική τεκμηρίωση."),
+        ("in_text_citations", "## ΣΤΥΛ ΠΑΡΕΝΘΕΤΙΚΗΣ ΑΝΑΦΟΡΑΣ", "κανόνας APA 7th ανεξαρτήτως γλώσσας κειμένου."),
+        ("in_text_citations", "## Στυλ Αναφορών (παρενθετική στο τέλος)", 'σημαντικά τα τελευταία χρόνια (Smith & Jones, 2022)."'),
     ],
     "structure": [
         ("subsection_keywords", "### ΒΑΣΙΚΕΣ ΛΕΞΕΙΣ ΑΝΑ ΥΠΟΕΝΟΤΗΤΑ", "Αυτοί είναι οι κύριοι όροι/έννοιες που αναπτύσσονται στη συγκεκριμένη υποενότητα."),
@@ -119,6 +122,19 @@ _REPLACEMENTS = {
         ("activities", _ACTIVITY_BULLETS, ""),
         ("activities", *_PLURAL_ACTIVITIES),
         ("self_assessment", *_PLURAL_QUESTIONS),
+        # In-text citations OFF = no (Επώνυμο, Έτος) in the body; the
+        # bibliography stays as the list of sources the content is based on.
+        ("in_text_citations",
+         "- Όλες τις αναφορές που χρησιμοποιήθηκαν στο κείμενο, ΑΛΦΑΒΗΤΙΚΑ",
+         "- Τις πηγές στις οποίες βασίζεται το περιεχόμενο, ΑΛΦΑΒΗΤΙΚΑ"),
+        ("in_text_citations",
+         "ΚΡΙΤΙΚΟ: ΚΑΘΕ in-text citation (Επώνυμο, Έτος) ΠΡΕΠΕΙ να έχει αντίστοιχη εγγραφή στη Βιβλιογραφία.\n", ""),
+        ("in_text_citations", "ΜΗΝ γράφεις αριθμούς σελίδων σε παραπομπές, εκτός αν είσαι βέβαιος.\n", ""),
+        ("in_text_citations",
+         'Ορισμοί με παραπομπές στο τέλος: "...ορίζεται ως η διαδικασία X (Smith, 2022)."',
+         "Ορισμοί σε πλήρεις παραγράφους."),
+        ("in_text_citations", "της αγοράς\n(Smith, 2022). Παράλληλα", "της αγοράς. Παράλληλα"),
+        ("in_text_citations", 'ανταγωνιστικότητας (Johnson & Brown, 2021)."', 'ανταγωνιστικότητας."'),
     ],
     "structure": [
         ("activities", *_PLURAL_ACTIVITIES),
@@ -148,7 +164,8 @@ _ELEMENT_INFO = {
     ),
     "in_text_citations": (
         "Ενδοκειμενικές αναφορές",
-        "παρενθετικές αναφορές (Επώνυμο, Έτος) μέσα στο κείμενο",
+        "παραπομπές (Επώνυμο, Έτος) ή «Σύμφωνα με τον Χ» μέσα στο κείμενο — "
+        "η Βιβλιογραφία στο τέλος παραμένει ως οι πηγές στις οποίες βασίζεται το περιεχόμενο",
     ),
 }
 
@@ -267,7 +284,7 @@ def build_structure_manifest(cfg: StructureConfig) -> str:
 
     Appended at the END of user prompts (recency) so the model knows what
     each disabled element is and that it must not add it. Empty when every
-    element is ON. In-text citations turned OFF are relaxed, not forbidden.
+    element is ON.
     """
     if cfg.all_on:
         return ""
@@ -277,7 +294,7 @@ def build_structure_manifest(cfg: StructureConfig) -> str:
     forbidden = [
         f"- {_ELEMENT_INFO[k][0]} ({_ELEMENT_INFO[k][1]})"
         for k in OPTIONAL_KEYS
-        if not flags[k] and k != "in_text_citations"
+        if not flags[k]
     ]
 
     lines = [
@@ -291,13 +308,9 @@ def build_structure_manifest(cfg: StructureConfig) -> str:
             "ΔΕΝ ΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ — ΑΠΑΓΟΡΕΥΕΤΑΙ να τα προσθέσεις, ακόμη και σύντομα ή με άλλον τίτλο:"
         )
         lines.extend(forbidden)
-    if not cfg.in_text_citations:
-        lines.append(
-            "Οι ενδοκειμενικές αναφορές δεν είναι υποχρεωτικές σε κάθε παράγραφο — "
-            "χρησιμοποίησέ τες όπου τεκμηριώνουν κάτι ουσιαστικό."
-        )
     lines.append(
-        "Εξαίρεση: αν οι ΟΔΗΓΙΕΣ ΧΡΗΣΤΗ ζητούν ρητά κάποιο από τα παραπάνω, ακολούθησε τις οδηγίες χρήστη."
+        "Εξαίρεση: αν οι ΟΔΗΓΙΕΣ ΧΡΗΣΤΗ ή οι ΖΗΤΟΥΜΕΝΕΣ ΑΛΛΑΓΕΣ ζητούν ρητά την προσθήκη ή αφαίρεση "
+        "κάποιου από τα παραπάνω, ακολούθησέ τες."
     )
     return "\n".join(lines) + "\n"
 
@@ -323,15 +336,84 @@ _VIOLATION_PATTERNS = {
     ),
     "glossary": re.compile(r"^\s*#+\s*Γλωσσάρι", re.IGNORECASE | re.MULTILINE),
     "subsection_keywords": re.compile(r"\*\*Βασικές λέξεις:\*\*", re.IGNORECASE),
+    # "(Smith, 2020)", "(Porter & Kramer, 2011; OECD, 2019)" — not the bare
+    # "(2020)." of a bibliography entry.
+    "in_text_citations": re.compile(r"\([^()]*?[^\W\d_]{2,}[^()]*?,\s*\d{4}[a-z]?\b[^()]*\)"),
+}
+
+# Words in the user's free-text instructions that ask for an element — an
+# element the user explicitly requested is never reported as a violation.
+_REQUEST_PATTERNS = {
+    "activities": re.compile(r"δραστηριοτητ|ασκησ|activit|exercis"),
+    "self_assessment": re.compile(r"ερωτησ|αυτοαξιολογ|mcq|quiz"),
+    "glossary": re.compile(r"γλωσσαρ|glossary"),
+    "subsection_keywords": re.compile(r"βασικες λεξεις|keywords"),
+    "in_text_citations": re.compile(r"ενδοκειμενικ|παραπομπ|citation"),
 }
 
 
-def detect_structure_violations(text: str, cfg: StructureConfig) -> list[str]:
-    """Return the keys of disabled elements that nevertheless appear in ``text``."""
+def _fold(text: str) -> str:
+    """Lowercase and strip Greek accents so "Δραστηριότητες" matches "δραστηριοτητ"."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+# A mention preceded by one of these in the same clause is a prohibition
+# ("μην βάλεις δραστηριότητες", "χωρίς γλωσσάρι"), not a request.
+_NEGATION = re.compile(
+    r"\b(?:μην|μη|χωρις|οχι|δεν|without|no|not|dont|don't)\b|αφαιρεσ|βγαλ|παραλει|remove|omit|exclude"
+)
+# Clause boundaries: a negation only applies within its own clause, so in
+# "Χωρίς γλωσσάρι, πρόσθεσε δραστηριότητες" the activities are requested.
+_CLAUSE_BOUNDARY = re.compile(r"[.;!?\n,]")
+
+
+def elements_requested(instructions: str) -> set[str]:
+    """Keys of the optional elements that the user's instructions ask FOR.
+
+    An element counts as requested when at least one mention of it is not
+    negated within its clause.
+    """
+    folded = _fold(instructions or "")
+    requested = set()
+    for key, pattern in _REQUEST_PATTERNS.items():
+        for match in pattern.finditer(folded):
+            boundaries = [b.end() for b in _CLAUSE_BOUNDARY.finditer(folded, 0, match.start())]
+            clause_prefix = folded[(boundaries[-1] if boundaries else 0):match.start()]
+            if not _NEGATION.search(clause_prefix):
+                requested.add(key)
+                break
+    return requested
+
+
+def present_elements(text: str) -> set[str]:
+    """Keys of the optional elements that already appear in ``text``."""
+    return {key for key, pattern in _VIOLATION_PATTERNS.items() if pattern.search(text)}
+
+
+def revision_config(cfg: StructureConfig, draft: str) -> StructureConfig:
+    """Structure for a revision ("Αλλαγές") of an existing draft.
+
+    Whatever the draft already contains is part of its structure — e.g. the
+    glossary of an uploaded document — so it is kept and never flagged, even
+    when that element is OFF in the UI. Only ADDING a disabled element stays
+    forbidden.
+    """
+    present = present_elements(draft)
+    return replace(cfg, **{key: True for key in present})
+
+
+def detect_structure_violations(text: str, cfg: StructureConfig, instructions: str = "") -> list[str]:
+    """Return the keys of disabled elements that nevertheless appear in ``text``.
+
+    Elements mentioned in the user's ``instructions`` are skipped: the user
+    asked for them, so they are not "unrequested".
+    """
     flags = cfg.as_flags()
+    requested = elements_requested(instructions)
     return [
         key for key, pattern in _VIOLATION_PATTERNS.items()
-        if not flags[key] and pattern.search(text)
+        if not flags[key] and key not in requested and pattern.search(text)
     ]
 
 
