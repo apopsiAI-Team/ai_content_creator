@@ -64,7 +64,9 @@ class ClaudeService(LLMService):
         if system:
             kwargs["system"] = _cacheable_system(system)
         response = await self.client.messages.create(**kwargs)
-        text = response.content[0].text if response.content else ""
+        # With adaptive thinking the first block is a ThinkingBlock (no .text),
+        # so join only the text blocks.
+        text = "".join(block.text for block in response.content if block.type == "text")
         return text, {
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,

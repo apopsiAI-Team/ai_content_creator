@@ -2,11 +2,11 @@
 Structure configuration for educational-content generation.
 
 Selects which OPTIONAL structural elements appear in generated material.
-The "quality core" — academic register, paragraph depth (150-250 words),
-APA citation format, the mandatory Βιβλιογραφία, anti-hallucination rules,
+The "quality core" — academic register, paragraph depth, APA citation
+format, the mandatory Βιβλιογραφία, anti-hallucination rules,
 theoretical-framework depth — is NOT configurable and is always present.
 
-Only these optional elements can be toggled off from the UI:
+Only these optional elements can be toggled from the UI:
 
   - activities          Δραστηριότητες (2 ανά υποενότητα)
   - self_assessment     Ερωτήσεις / Απαντήσεις Αυτοαξιολόγησης
@@ -14,21 +14,25 @@ Only these optional elements can be toggled off from the UI:
   - subsection_keywords **Βασικές λέξεις:** ανά υποενότητα
   - in_text_citations   Υποχρεωτική πυκνότητα παρενθετικών αναφορών (Επώνυμο, Έτος)
 
+Defaults: everything OFF except in-text citations — elements are on demand.
 Bibliography stays mandatory in every mode.
 
-How it works (and why it is safe): the prompt constants in ``system_prompt``
-are left UNTOUCHED. For each element that is turned OFF, the exact text span
-that mandates it is removed from the prompt. When every element is ON, the
-builders return the original constant verbatim (fast path) — i.e. the default
-generation path is byte-identical to before this feature existed, so there is
-zero regression and no possibility of silently weakening quality.
+How it works: the prompt constants in ``system_prompt`` are left UNTOUCHED.
+For each element that is turned OFF:
 
-The contradiction the free-text "οδηγίες" used to fight (system prompt screams
-"ΥΠΟΧΡΕΩΤΙΚΟ γλωσσάρι" while the user asks for none) is eliminated by ABSENCE,
-never by an override instruction.
+  1. the text span that mandates it is removed from the prompt (_REGIONS),
+  2. stray mentions elsewhere in the prompt are neutralised (_REPLACEMENTS),
+  3. an explicit manifest (``build_structure_manifest``) is appended to the
+     user prompt, naming each disabled element and forbidding it. Removal by
+     absence alone was not enough — the model's prior for "educational
+     material" kept re-adding activities.
+
+When every element is ON the builders return the original constants verbatim.
+``detect_structure_violations`` is a post-generation safety net.
 """
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass
 
@@ -50,19 +54,21 @@ OPTIONAL_KEYS = (
 
 @dataclass(frozen=True)
 class StructureConfig:
-    """Which optional structural elements to include (all default ON)."""
+    """Which optional structural elements to include (on demand — only
+    in-text citations are ON by default)."""
 
-    activities: bool = True
-    self_assessment: bool = True
-    glossary: bool = True
-    subsection_keywords: bool = True
+    activities: bool = False
+    self_assessment: bool = False
+    glossary: bool = False
+    subsection_keywords: bool = False
     in_text_citations: bool = True
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "StructureConfig":
         if not data:
             return cls()
-        return cls(**{k: bool(data.get(k, True)) for k in OPTIONAL_KEYS})
+        defaults = cls()
+        return cls(**{k: bool(data.get(k, getattr(defaults, k))) for k in OPTIONAL_KEYS})
 
     def as_flags(self) -> dict:
         return {k: getattr(self, k) for k in OPTIONAL_KEYS}
@@ -70,6 +76,9 @@ class StructureConfig:
     @property
     def all_on(self) -> bool:
         return all(self.as_flags().values())
+
+
+ALL_ON = StructureConfig(**{k: True for k in OPTIONAL_KEYS})
 
 
 # (flag, start_anchor, end_anchor) — the inclusive span is removed when the
@@ -96,6 +105,53 @@ _REGIONS = {
     ],
 }
 
+# (flag, old, new) — stray mentions outside the regions above, replaced
+# (all occurrences) when the flag is OFF. Applied in order after the regions.
+_ACTIVITY_BULLETS = '3. "Οδηγίες" δραστηριοτήτων (bullets •)\n'
+_PLURAL_ACTIVITIES = ("σε δραστηριότητες, προσδοκώμενα", "σε προσδοκώμενα")
+_PLURAL_QUESTIONS = ("προσδοκώμενα αποτελέσματα και ερωτήσεις", "προσδοκώμενα αποτελέσματα")
+
+_REPLACEMENTS = {
+    "system": [
+        ("activities", _ACTIVITY_BULLETS, ""),
+    ],
+    "experimental": [
+        ("activities", _ACTIVITY_BULLETS, ""),
+        ("activities", *_PLURAL_ACTIVITIES),
+        ("self_assessment", *_PLURAL_QUESTIONS),
+    ],
+    "structure": [
+        ("activities", *_PLURAL_ACTIVITIES),
+        ("self_assessment", *_PLURAL_QUESTIONS),
+    ],
+}
+
+# Human-readable names + a one-line description, so the model knows exactly
+# what a disabled element looks like and can avoid it.
+_ELEMENT_INFO = {
+    "activities": (
+        "Δραστηριότητες",
+        "ασκήσεις/δραστηριότητες με Τίτλο, Περιγραφή, Οδηγίες και Στόχο, "
+        "συνήθως στο τέλος των υποενοτήτων",
+    ),
+    "self_assessment": (
+        "Ερωτήσεις Αυτοαξιολόγησης",
+        "ερωτήσεις πολλαπλής επιλογής και ενότητα Απαντήσεων",
+    ),
+    "glossary": (
+        "Γλωσσάρι",
+        "ενότητα με ορισμούς βασικών όρων στο τέλος του τμήματος",
+    ),
+    "subsection_keywords": (
+        "Βασικές λέξεις ανά υποενότητα",
+        'γραμμή "**Βασικές λέξεις:** ..." κάτω από τον τίτλο κάθε υποενότητας',
+    ),
+    "in_text_citations": (
+        "Ενδοκειμενικές αναφορές",
+        "παρενθετικές αναφορές (Επώνυμο, Έτος) μέσα στο κείμενο",
+    ),
+}
+
 
 def _strip_region(text: str, start_anchor: str, end_anchor: str) -> str:
     i = text.find(start_anchor)
@@ -117,6 +173,12 @@ def _replace_region(text: str, start_anchor: str, end_anchor: str, replacement: 
     return text[:i] + replacement + text[j + len(end_anchor):]
 
 
+def _replace_exact(text: str, old: str, new: str) -> str:
+    if old not in text:
+        raise KeyError(f"structure: replacement text not found: {old!r}")
+    return text.replace(old, new)
+
+
 def _apply(text: str, region_key: str, cfg: StructureConfig) -> str:
     if cfg.all_on:
         return text  # byte-identical default path
@@ -124,6 +186,9 @@ def _apply(text: str, region_key: str, cfg: StructureConfig) -> str:
     for flag, start, end in _REGIONS.get(region_key, []):
         if not flags[flag]:
             text = _strip_region(text, start, end)
+    for flag, old, new in _REPLACEMENTS.get(region_key, []):
+        if not flags[flag]:
+            text = _replace_exact(text, old, new)
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
@@ -164,14 +229,24 @@ def build_expand_prompt(cfg: StructureConfig) -> str:
         text = _strip_region(text, "6. ΑΜΕΣΩΣ μετά τον τίτλο κάθε υποενότητας:", "**Βασικές λέξεις:** όρος1, όρος2, ...")
     if not cfg.activities:
         text = _strip_region(text, "7. 2 δραστηριότητες στο ΤΕΛΟΣ", "Στόχο δραστηριότητας")
+        text = _replace_exact(text, ", bullets (•) στις Οδηγίες δραστηριοτήτων.", ".")
+    if not (cfg.activities and cfg.self_assessment):
+        addressed = [
+            name for on, name in ((cfg.activities, "δραστηριότητες"), (cfg.self_assessment, "ερωτήσεις")) if on
+        ]
+        plural = (
+            f"Β' πληθυντικό σε {addressed[0]}."
+            if addressed
+            else "Β' πληθυντικό όπου απευθύνεσαι στον αναγνώστη."
+        )
+        text = _replace_exact(text, "Β' πληθυντικό σε δραστηριότητες & ερωτήσεις.", plural)
     return text
 
 
 def build_final_reminder(cfg: StructureConfig, mcq_instruction: str) -> str:
     """The "ΥΠΟΧΡΕΩΤΙΚΟ στο ΤΕΛΟΣ" block, listing only active end sections.
 
-    Βιβλιογραφία is always present. Returns "" only in the impossible case of
-    no end sections (bibliography keeps it non-empty).
+    Βιβλιογραφία is always present, so the block is never empty.
     """
     items = []
     if cfg.self_assessment:
@@ -187,6 +262,46 @@ def build_final_reminder(cfg: StructureConfig, mcq_instruction: str) -> str:
     )
 
 
+def build_structure_manifest(cfg: StructureConfig) -> str:
+    """Explicit list of included / forbidden optional elements.
+
+    Appended at the END of user prompts (recency) so the model knows what
+    each disabled element is and that it must not add it. Empty when every
+    element is ON. In-text citations turned OFF are relaxed, not forbidden.
+    """
+    if cfg.all_on:
+        return ""
+    flags = cfg.as_flags()
+    included = [_ELEMENT_INFO[k][0] for k in OPTIONAL_KEYS if flags[k]]
+    included.append("Βιβλιογραφία (πάντα υποχρεωτική)")
+    forbidden = [
+        f"- {_ELEMENT_INFO[k][0]} ({_ELEMENT_INFO[k][1]})"
+        for k in OPTIONAL_KEYS
+        if not flags[k] and k != "in_text_citations"
+    ]
+
+    lines = [
+        "",
+        "",
+        "## ΔΟΜΗ ΠΟΥ ΕΠΕΛΕΞΕ Ο ΧΡΗΣΤΗΣ (ΚΡΙΣΙΜΟ — ΥΠΕΡΙΣΧΥΕΙ κάθε γενικής σύμβασης για εκπαιδευτικό υλικό)",
+        "Προαιρετικά στοιχεία που ΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ: " + ", ".join(included) + ".",
+    ]
+    if forbidden:
+        lines.append(
+            "ΔΕΝ ΠΕΡΙΛΑΜΒΑΝΟΝΤΑΙ — ΑΠΑΓΟΡΕΥΕΤΑΙ να τα προσθέσεις, ακόμη και σύντομα ή με άλλον τίτλο:"
+        )
+        lines.extend(forbidden)
+    if not cfg.in_text_citations:
+        lines.append(
+            "Οι ενδοκειμενικές αναφορές δεν είναι υποχρεωτικές σε κάθε παράγραφο — "
+            "χρησιμοποίησέ τες όπου τεκμηριώνουν κάτι ουσιαστικό."
+        )
+    lines.append(
+        "Εξαίρεση: αν οι ΟΔΗΓΙΕΣ ΧΡΗΣΤΗ ζητούν ρητά κάποιο από τα παραπάνω, ακολούθησε τις οδηγίες χρήστη."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def end_sections_label(cfg: StructureConfig) -> str:
     """Comma-joined active end-section names, e.g. 'Ερωτήσεις, Βιβλιογραφία, Γλωσσάρι'."""
     names = []
@@ -198,16 +313,37 @@ def end_sections_label(cfg: StructureConfig) -> str:
     return ", ".join(names)
 
 
+# Patterns that reveal a disabled element in generated text.
+_VIOLATION_PATTERNS = {
+    "activities": re.compile(
+        r"^\s*(?:#+\s*|\*\*)?\s*Δραστηριότητ(?:α\s+\d|ες\b)", re.IGNORECASE | re.MULTILINE
+    ),
+    "self_assessment": re.compile(
+        r"^\s*#+\s*(?:Ερωτήσεις|Απαντήσεις)\s+Αυτοαξιολόγησης", re.IGNORECASE | re.MULTILINE
+    ),
+    "glossary": re.compile(r"^\s*#+\s*Γλωσσάρι", re.IGNORECASE | re.MULTILINE),
+    "subsection_keywords": re.compile(r"\*\*Βασικές λέξεις:\*\*", re.IGNORECASE),
+}
+
+
+def detect_structure_violations(text: str, cfg: StructureConfig) -> list[str]:
+    """Return the keys of disabled elements that nevertheless appear in ``text``."""
+    flags = cfg.as_flags()
+    return [
+        key for key, pattern in _VIOLATION_PATTERNS.items()
+        if not flags[key] and pattern.search(text)
+    ]
+
+
 def _validate() -> None:
     """Fail fast at import time if any anchor drifts out of the prompts."""
-    all_on = StructureConfig()
-    assert build_system_prompt(all_on) == SYSTEM_PROMPT
-    assert build_system_prompt(all_on, experimental=True) == EXPERIMENTAL_SYSTEM_PROMPT
-    assert build_structure_block(all_on) == STANDARD_CONTENT_STRUCTURE
-    assert build_expand_prompt(all_on) == EXPAND_PROMPT
-    # every region anchor must resolve when its flag is OFF
-    for key in OPTIONAL_KEYS:
-        cfg = StructureConfig(**{key: False})
+    assert build_system_prompt(ALL_ON) == SYSTEM_PROMPT
+    assert build_system_prompt(ALL_ON, experimental=True) == EXPERIMENTAL_SYSTEM_PROMPT
+    assert build_structure_block(ALL_ON) == STANDARD_CONTENT_STRUCTURE
+    assert build_expand_prompt(ALL_ON) == EXPAND_PROMPT
+    # every anchor / replacement must resolve under every combination of flags
+    for combo in itertools.product((True, False), repeat=len(OPTIONAL_KEYS)):
+        cfg = StructureConfig(**dict(zip(OPTIONAL_KEYS, combo)))
         build_system_prompt(cfg)
         build_system_prompt(cfg, experimental=True)
         build_structure_block(cfg)

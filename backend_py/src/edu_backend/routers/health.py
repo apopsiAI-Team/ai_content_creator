@@ -15,6 +15,7 @@ async def health_check():
         "status": "ok",
         "has_api_key": bool(settings.anthropic_api_key),
         "model": settings.model_id,
+        "openai_enabled": settings.openai_enabled,
         "research_hub_available": settings.research_hub_path.exists(),
         "esco_data_available": settings.esco_data_path.exists(),
     }

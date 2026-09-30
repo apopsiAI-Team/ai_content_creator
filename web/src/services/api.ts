@@ -1,4 +1,4 @@
-import type { StructureConfig } from '../store/useStore';
+import type { BibliographyCheck, StructureConfig } from '../store/useStore';
 
 // Backend API service - Python FastAPI backend.
 // Default to same-origin (/api) so Cloudflare tunnels work without CORS issues.
@@ -90,8 +90,11 @@ function processSseBuffer(
 
 interface HealthStatus {
   status: string;
-  hasApiKey: boolean;
-  escoSkillsLoaded: boolean;
+  has_api_key: boolean;
+  model: string;
+  /** OpenAI is off unless the backend sets OPENAI_ENABLED=true. */
+  openai_enabled: boolean;
+  esco_data_available: boolean;
 }
 
 interface ClaudeMessage {
@@ -264,6 +267,7 @@ export async function generateEducationalContentStream(
   documentId = '',
   occupation: Occupation | null = null,
   structureConfig?: StructureConfig,
+  onStructureWarnings?: (keys: string[]) => void,
 ): Promise<void> {
   const response = await fetch(apiUrl('/api/generate-stream'), {
     method: 'POST',
@@ -301,32 +305,52 @@ export async function generateEducationalContentStream(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    buffer = processSseBuffer(buffer, (data) => {
-      if (data.type === 'content' && typeof data.text === 'string') {
-        onChunk(data.text);
-      } else if (data.type === 'references' && onReferences && Array.isArray(data.data)) {
-        onReferences(data.data as GenerationResult['references']);
-      } else if (data.type === 'queue' && onQueue) {
-        onQueue(data.position as number, data.estimated_wait as number);
-      }
-    });
-  }
-
-  buffer += decoder.decode();
-  processSseBuffer(buffer, (data) => {
+  const handleEvent = (data: SseEvent) => {
     if (data.type === 'content' && typeof data.text === 'string') {
       onChunk(data.text);
     } else if (data.type === 'references' && onReferences && Array.isArray(data.data)) {
       onReferences(data.data as GenerationResult['references']);
     } else if (data.type === 'queue' && onQueue) {
       onQueue(data.position as number, data.estimated_wait as number);
+    } else if (data.type === 'structure_warnings' && onStructureWarnings && Array.isArray(data.data)) {
+      onStructureWarnings(data.data as string[]);
     }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    buffer = processSseBuffer(buffer, handleEvent);
+  }
+
+  buffer += decoder.decode();
+  processSseBuffer(buffer, handleEvent);
+}
+
+export interface VerifyBibliographyResult extends BibliographyCheck {
+  /** Batch content with wrong DOIs corrected or removed. */
+  content: string;
+  changed: boolean;
+}
+
+// Check every Βιβλιογραφία entry against CrossRef/OpenAlex (no LLM call).
+export async function verifyBibliography(
+  content: string,
+  documentId = '',
+): Promise<VerifyBibliographyResult> {
+  const response = await fetch(apiUrl('/api/verify-bibliography'), {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify({ content, document_id: documentId }),
   });
+
+  if (!response.ok) {
+    throw await apiError(response);
+  }
+
+  return response.json();
 }
 
 // Generate full APA bibliography from in-text citations (fallback)

@@ -35,6 +35,8 @@ uvicorn edu_backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 Requires `ANTHROPIC_API_KEY` in `.env` at project root (loaded by `main.py`).
 
+Tests: `pip install -e "backend_py[dev]"` then `cd backend_py && pytest tests` (structure prompts, page budget, citation verifier with mocked HTTP).
+
 ### Research Hub MCP (Rust)
 ```bash
 cd research_hub_mcp
@@ -64,25 +66,29 @@ The Landing Page exposes a tab bar with two distinct entry points:
    - User picks a module from `ModuleList`; generation runs against that module's ESCO skill list
    - After generation, an ESCO **skill coverage review** runs (full / partial / missing per skill, with evidence quotes)
 
-### Content sub-modes (`contentMode`)
+### Content mode (`contentMode`)
 
-Inside any workflow, the prompt path is selected by `contentMode`:
+Only `experimental` is exposed in the UI (the "Κανονική"/`standard` Research Hub mode was retired — its bibliography was too thin in practice). The type still allows `'standard'` for compatibility, but the store always sets `'experimental'` and `claudeService` never requests the Research Hub.
 
-- `standard` — Uses the Research Hub: backend searches CrossRef + Rust hub for ~15 papers, sends them as "available references", and Claude is constrained to cite only those.
-- `experimental` — Anti-hallucination prompt (`EXPERIMENTAL_SYSTEM_PROMPT` in `claude_service.py`); Claude uses its own knowledge of real academic sources, theses are forbidden, every 2–3 paragraphs must carry an in-text citation, full APA bibliography mandatory.
+- `experimental` — Anti-hallucination prompt (`EXPERIMENTAL_SYSTEM_PROMPT` in `prompts/system_prompt.py`); the model cites real sources from its own knowledge (seminal works/textbooks → official reports → highly cited articles), DOI only when certain, theses forbidden, full APA bibliography mandatory.
+- **Bibliography verification** — after every batch the frontend calls `POST /api/verify-bibliography` (`services/citation_verifier.py`): each entry is checked against CrossRef → OpenAlex → Open Library (books), or its cited URL must resolve (reports). Wrong DOIs are corrected (same year ±1 only) or removed in the content; unverified entries, placeholders, theses and in-text citations without an entry are flagged on the batch card, with a one-click revision to replace them.
 
-`userInstructions` is an independent free-text steer that can be combined with either content mode.
+`userInstructions` is an independent free-text steer.
+
+### Structure (`structureConfig`)
+
+Optional elements are **on demand**: `activities`, `self_assessment`, `glossary`, `subsection_keywords` default OFF, `in_text_citations` defaults ON (`DEFAULT_STRUCTURE_CONFIG` in `useStore.ts`, mirrored in `prompts/structure.py` and `StructureConfigModel`). For a disabled element `prompts/structure.py` strips its prompt section, neutralises stray mentions, and appends an explicit manifest (`build_structure_manifest`) forbidding it. The DOCX `activities` field is only sent when activities are ON. `detect_structure_violations` runs on the finished stream; hits are sent as a `structure_warnings` SSE event and shown on the batch card with a one-click removal.
 
 ### End-to-end content flow
 
 1. Frontend posts to `POST /api/generate-stream` with the module dict, `experimental_mode`, `target_pages`, `learning_outcomes`, `keywords`, `previous_content`, `batch_number`, `total_batches`, optional `user_instructions`.
 2. Backend (`generate.py` → `claude_service.generate_content_stream`):
-   - Standard mode only: queries Research Hub; emits `{type: 'references', data: [...]}` SSE event first
+   - Emits `{type: 'references', data: [...]}` first (empty — the Research Hub path is no longer used by the UI)
    - May emit a `{type: 'queue', position, estimated_wait}` event if the rate limiter is saturated
    - Streams `{type: 'content', text}` deltas as Claude streams
-   - **Auto-continuation:** if `stop_reason == "max_tokens"` OR final length is < 85% of the page target, sends a follow-up turn that includes the last 4k chars as the assistant message and asks Claude to continue (and to add any missing MCQs / Bibliography / Glossary section). Token usage is summed across all turns.
-   - Final `{type: 'done'}` event
-3. Frontend (`claudeService.generateWithStreaming`) accumulates the text and, **if no Bibliography section landed and no structured refs came from Research Hub**, scrapes in-text citations from the body and calls `POST /api/generate-bibliography` to synthesize an APA list as a fallback.
+   - **Auto-continuation:** if `stop_reason == "max_tokens"` OR final length is < 70% of the page target, sends a follow-up turn that includes the last 4k chars as the assistant message and asks Claude to continue — at most up to the target (and to add any missing enabled end sections). Token usage is summed across all turns.
+   - `{type: 'structure_warnings', data: [...]}` if disabled elements appeared anyway, then the final `{type: 'done'}` event
+3. Frontend (`claudeService.generateWithStreaming`) accumulates the text and, **if no Bibliography section landed**, scrapes in-text citations from the body and calls `POST /api/generate-bibliography` to synthesize an APA list as a fallback. It then calls `POST /api/verify-bibliography` and stores the result on the batch (`bibliographyCheck`).
 4. User approves/rejects each batch; rejected batches are regenerated; pages add up to `totalModulePages`.
 5. ESCO mode: after all batches are approved, frontend calls `POST /api/review` for skill-coverage analysis (`SkillCoverageReview` rendered by `SkillCoverageReview.tsx`).
 6. **Approve & Finish** triggers `POST /api/generate-summary` (Περίληψη, 500–800 words) over the concatenated approved content.
@@ -94,12 +100,14 @@ Inside any workflow, the prompt path is selected by `contentMode`:
 - `rate_limiter.py` — Semaphore-based concurrency control + sliding-window token tracker; tier-aware (2/3/4); `Priority.HEAVY` (content gen) vs `Priority.LIGHT` (summary/bibliography/review); per-user caps; emits queue position to frontend
 - `services/claude_service.py` — All Anthropic calls. Prompts cached via `cache_control: ephemeral` (90% cost reduction, ~5 min TTL). Stream retries with exponential backoff + jitter for 429/5xx/overload.
 - `services/research_service.py` — CrossRef + Rust hub queries; thesis/dissertation filtering; English keyword translation for Greek-language queries
+- `services/citation_verifier.py` — Bibliography verification (CrossRef / OpenAlex / Open Library / URL check), DOI correction, orphan-citation detection
+- `prompts/structure.py` — `StructureConfig`, prompt stripping + manifest for disabled elements, `detect_structure_violations`
 - `services/esco_service.py` — Loads `data/skills_compact.json` (preprocessed Greek ESCO skills); name lookup + partial search
 - `prompts/system_prompt.py` — `SYSTEM_PROMPT`, `OUTLINE_PROMPT`, `EXPAND_PROMPT`, `CITATIONS_PROMPT`, `REVIEW_PROMPT`, `STANDARD_CONTENT_STRUCTURE`
 - `routers/`:
   - `health.py` — `GET /api/health`
   - `esco.py` — `GET /api/esco/skills`, `GET /api/esco/search`
-  - `generate.py` — `POST /api/generate` (multipass), `POST /api/generate-stream`, `POST /api/generate-summary`, `POST /api/generate-bibliography`, `POST /api/review`, `GET /api/research/search`
+  - `generate.py` — `POST /api/generate` (multipass), `POST /api/generate-stream`, `POST /api/generate-summary`, `POST /api/generate-bibliography`, `POST /api/verify-bibliography`, `POST /api/review`, `GET /api/research/search`
   - `claude.py` — Generic `POST /api/claude/generate` and `/api/claude/generate-stream` proxies (used by the frontend's ESCO skill-review JSON call)
 
 ### Web app key files
@@ -118,7 +126,7 @@ Inside any workflow, the prompt path is selected by `contentMode`:
 - **Document**: `documentFile`, `documentTitle`, `modules`, `totalHours`
 - **Standard extras**: `totalModulePages`, `targetPages`, `learningOutcomes`, `keywords`
 - **Generation**: `selectedModule`, `currentBatch`, `generatedBatches`, `isGenerating`, `generationProgress`
-- **Content sub-mode**: `contentMode: 'standard' | 'experimental'`, `userInstructions`
+- **Content sub-mode**: `contentMode` (always `'experimental'`), `userInstructions`, `structureConfig`
 - **References**: `pendingReferences`, `approvedReferences`
 - **ESCO review**: `skillReviews`, `isReviewingSkills`
 - **Production**: `productionComplete`, `moduleSummaries`, `isGeneratingSummary`
@@ -133,6 +141,8 @@ ANTHROPIC_API_KEY=<key>
 ```
 Optional: `ANTHROPIC_TIER` (2/3/4, default 2).
 
+OpenAI (`gpt-5.6-sol`) is **disabled by default**: `get_llm_service()` falls back to Claude for every request and the Landing Page hides the model picker (it reads `openai_enabled` from `GET /api/health`). To enable it, set `OPENAI_ENABLED=true` and `OPENAI_API_KEY=<key>` in `.env` and restart the backend.
+
 Frontend (`web/.env`, optional):
 ```
 VITE_API_URL=http://localhost:8000   # default: same-origin
@@ -142,10 +152,10 @@ VITE_API_URL=http://localhost:8000   # default: same-origin
 
 - **Model:** `claude-opus-5` (set in `backend_py/.../config.py`). Streaming via `client.messages.stream`; non-stream paths use `client.messages.create`.
 - **Prompt caching:** every system prompt is wrapped via `_cacheable_system()` with `cache_control: {"type": "ephemeral"}`.
-- **Per-batch sections:** Σκοπός → Προσδοκώμενα → Λέξεις Κλειδιά → (Εισαγωγή only batch 1) → Υποενότητες → MCQs → Βιβλιογραφία → Γλωσσάρι.
-- **Dynamic MCQ count:** 20 total per module, distributed proportionally across batches (`per_batch = max(5, 20 // total_batches + ...)`); single-batch always gets 20.
+- **Per-batch sections:** Σκοπός → Προσδοκώμενα → Λέξεις Κλειδιά → (Εισαγωγή only batch 1) → Υποενότητες → [MCQs] → Βιβλιογραφία → [Γλωσσάρι] (bracketed = only when enabled in `structureConfig`).
+- **Dynamic MCQ count** (only when `self_assessment` is ON): 20 total per module, distributed proportionally across batches (`per_batch = max(5, 20 // total_batches + ...)`), capped so MCQs take ≤ ~25% of the batch's pages (`floor(target × 0.25 / 0.18)`).
 - **Continuation between batches:** for batch > 1, the previous content's headings + last 3000 chars are injected with explicit "ΣΥΝΕΧΙΣΕ ΑΠΟ ΕΔΩ" + "ΜΗΝ επαναλάβεις" guards.
-- **Page sizing:** the prompt asks for ~`target_pages` (~3000 chars/page) with a hard ceiling of `target_pages + 5`.
+- **Page sizing:** one page = `chars_per_page` = **2000 chars** (what fits on a page of the exported .docx: Calibri 12pt, 1.5 spacing). Keep `settings.chars_per_page` and `CHARS_PER_PAGE` (`web/src/utils/pages.ts`) in sync. The page target covers the **whole batch** (body + MCQs + bibliography + glossary): `page_budget()` subtracts the enabled end sections and the prompt states body pages, word count, subsection count, and a hard ceiling of `target_pages + 5`. MCQs are capped at ~25% of a batch's pages. The last batch requests only the remaining pages (min 1).
 - **Greek language throughout**, APA 7th, **parenthetical citations only** (the system prompt forbids "Σύμφωνα με τον X..." and forces "et al.", never "κ.ά.").
 - **Forbidden source types:** undergraduate / master's / doctoral theses are filtered out both by the prompt and by `research_service._filter_theses`.
 

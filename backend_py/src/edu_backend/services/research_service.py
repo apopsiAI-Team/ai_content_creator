@@ -13,6 +13,18 @@ from typing import Optional
 import httpx
 
 
+# Undergraduate/master thesis markers (doctoral dissertations are allowed).
+THESIS_KEYWORDS = [
+    # Greek — undergraduate/master only
+    "πτυχιακή εργασία", "πτυχιακή", "διπλωματική εργασία", "διπλωματική",
+    "μεταπτυχιακή εργασία", "μεταπτυχιακή διατριβή",
+    # English — undergraduate/master only
+    "undergraduate thesis", "bachelor thesis", "bachelor's thesis",
+    "master thesis", "master's thesis", "msc thesis",
+    "diploma thesis", "diploma work",
+]
+
+
 class ResearchService:
     def __init__(
         self,
@@ -259,15 +271,6 @@ class ResearchService:
 
     def _filter_theses(self, results: list[dict]) -> list[dict]:
         """Filter out undergraduate/master theses (doctoral dissertations allowed)"""
-        THESIS_KEYWORDS = [
-            # Greek — undergraduate/master only
-            "πτυχιακή εργασία", "πτυχιακή", "διπλωματική εργασία", "διπλωματική",
-            "μεταπτυχιακή εργασία", "μεταπτυχιακή διατριβή",
-            # English — undergraduate/master only
-            "undergraduate thesis", "bachelor thesis", "bachelor's thesis",
-            "master thesis", "master's thesis", "msc thesis",
-            "diploma thesis", "diploma work",
-        ]
         filtered = []
         removed = 0
         for item in results:

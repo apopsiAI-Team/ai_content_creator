@@ -19,7 +19,18 @@ class Settings(BaseSettings):
     # for backwards compatibility with existing code paths.
     model_id: str = "claude-opus-5"
     openai_model_id: str = "gpt-5.6-sol"
+    # OpenAI is disabled: every request runs on Claude and the UI hides the
+    # model picker. Set OPENAI_ENABLED=true (and OPENAI_API_KEY) to bring it back.
+    openai_enabled: bool = False
     max_tokens: int = 64000  # Max output tokens per API call (~30K typical, 64K cap)
+
+    # Page sizing — characters that fit on one page of the exported .docx
+    # (Calibri 12pt, 1.5 line spacing, 1"/1.25" margins). Must match
+    # CHARS_PER_PAGE in web/src/utils/pages.ts.
+    chars_per_page: int = 2000
+
+    # Contact address sent in the User-Agent to CrossRef/OpenAlex (polite pool)
+    crossref_mailto: str = "contact@example.com"
 
     # Rate limiting — Anthropic API tier (2, 3, or 4)
     anthropic_tier: int = 2

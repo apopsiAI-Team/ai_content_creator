@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, BookOpen, ChevronRight, Settings, Sparkles, FlaskConical } from 'lucide-react';
+import { Clock, BookOpen, ChevronRight, Settings } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import styles from './ModuleList.module.css';
 
@@ -12,8 +12,6 @@ export function ModuleList() {
     selectedModule,
     setSelectedModule,
     setCurrentStep,
-    contentMode,
-    setContentMode,
     setModuleHours,
     totalModulePages,
     setTotalModulePages,
@@ -138,33 +136,9 @@ export function ModuleList() {
               <label className={styles.settingLabel}>
                 Λειτουργία Δημιουργίας
               </label>
-              <div className={styles.modeToggle}>
-                <button
-                  className={`${styles.modeButton} ${contentMode === 'standard' ? styles.active : ''}`}
-                  onClick={() => setContentMode('standard')}
-                >
-                  <Sparkles size={18} />
-                  <div>
-                    <span className={styles.modeTitle}>Κανονική</span>
-                    <span className={styles.modeDesc}>Opus + Research Hub</span>
-                  </div>
-                </button>
-                <button
-                  className={`${styles.modeButton} ${styles.experimentalButton} ${contentMode === 'experimental' ? styles.active : ''}`}
-                  onClick={() => setContentMode('experimental')}
-                >
-                  <FlaskConical size={18} />
-                  <div>
-                    <span className={styles.modeTitle}>Πειραματική</span>
-                    <span className={styles.modeDesc}>Opus μόνος + strict prompt</span>
-                  </div>
-                </button>
-              </div>
-              {contentMode === 'experimental' && (
-                <p className={styles.experimentalHint}>
-                  Αυστηρός έλεγχος - υποχρεωτική βιβλιογραφία χωρίς Research Hub
-                </p>
-              )}
+              <p className={styles.experimentalHint}>
+                Βιβλιογραφία από τη γνώση του μοντέλου, με αυτόματο έλεγχο κάθε εγγραφής σε CrossRef/OpenAlex
+              </p>
               <label className={styles.checkboxLabel}>
                 <input
                   type="checkbox"

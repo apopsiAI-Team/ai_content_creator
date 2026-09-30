@@ -226,10 +226,11 @@ one held rate-limit slot**, all booked into one `record_usage` at the end. This 
    ]
    ```
 2. **Length continuation** (`llm_service.py:638-672`): triggered when the output came in
-   materially short of the page target — `estimated_pages < page_target * 0.85` **and not**
-   already truncated. Uses a **3000-chars-per-page** heuristic
-   (`estimated_pages = len(full_text) // 3000`). Re-streams asking for the remaining pages,
-   again replaying prompt + last-4000-char assistant turn (label `"length-continuation"`).
+   materially short of the page target — `estimated_pages < page_target * 0.7`
+   (`LENGTH_CONTINUE_THRESHOLD`) **and not** already truncated. Uses `settings.chars_per_page`
+   (**2000**, calibrated to the exported .docx layout). Re-streams asking for **at most** the
+   remaining pages, again replaying prompt + last-4000-char assistant turn (label
+   `"length-continuation"`).
 3. **Multi-batch continuation** (`llm_service.py:497-525`): cross-request continuation
    driven by the frontend via `batch_number` / `total_batches`. A `continuation_block`
    (prior headings + last 3000 chars) is injected into the prompt with explicit
@@ -409,6 +410,26 @@ wrapped in try/except and degrades gracefully:
   fallback when the Rust hub is unavailable.
 - `GET https://repository.kallipos.gr/...` (30s timeout).
 - `GET {rust_hub}/health` (5s timeout) — a `ConnectError` flips `_rust_available = False`.
+
+> The UI no longer requests the Research Hub (`use_research_hub` defaults to `false`); the
+> code path above is kept but unused.
+
+### 7.1b Bibliography verification — `citation_verifier.py` (`POST /api/verify-bibliography`)
+
+The only external HTTP now on the generation hot path. Called by the frontend once per
+generated batch, **no LLM call and no rate limiter**. One `httpx.AsyncClient` per request
+(8s timeout, follows redirects), entries checked **concurrently** via `asyncio.gather`,
+bounded by a module-level `asyncio.Semaphore(5)`; results cached in-process by normalised
+entry text (cleared at 2000 entries). Per entry, sequentially until a match:
+
+- `GET https://api.crossref.org/works/{doi}` (if the entry has a DOI)
+- `GET https://api.crossref.org/works?query.bibliographic=…&rows=3`
+- `GET https://api.openalex.org/works?search=…&per-page=3`
+- `GET https://openlibrary.org/search.json?q=…` (books)
+- `GET <cited URL>` — reports/web pages count as verified when the URL resolves (< 400)
+
+User-Agent carries `settings.crossref_mailto` (polite pool). No retries: any network error
+yields `unverified`, never an exception.
 
 ### 7.2 Rust side — `research_hub_mcp/` (where the parallelism lives)
 

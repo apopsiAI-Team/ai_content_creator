@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import random
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, AsyncIterator, Callable, Optional
@@ -30,8 +31,64 @@ from ..prompts.structure import (
     build_structure_block,
     build_expand_prompt,
     build_final_reminder,
+    build_structure_manifest,
     end_sections_label,
 )
+
+
+# =============================================================================
+# Page budgeting
+# =============================================================================
+# Hard ceiling above the requested page count ("+5 at most").
+PAGE_CEILING_MARGIN = 5
+# Average Greek word + space ≈ 7 chars → words that fit on one exported page.
+CHARS_PER_WORD = 7
+# Continue a too-short batch only below this fraction of the target.
+LENGTH_CONTINUE_THRESHOLD = 0.7
+# One MCQ (question + 4 options) ≈ 0.18 page; MCQs may take ≤ 25% of a batch.
+MCQ_PAGES_EACH = 0.18
+MCQ_PAGE_SHARE = 0.25
+# Cap for the non-streaming auxiliary calls (summary, bibliography, ESCO review).
+# Adaptive thinking counts against max_tokens, so leave room beyond the visible text.
+AUX_MAX_TOKENS = 16000
+
+
+def words_per_page() -> int:
+    return max(1, settings.chars_per_page // CHARS_PER_WORD)
+
+
+def page_budget(page_target: int, cfg: StructureConfig, mcq_count: int) -> tuple[int, float]:
+    """Split the batch page target between body text and the end sections.
+
+    The requested page count covers EVERYTHING in the exported .docx, so the
+    space taken by MCQs, bibliography and glossary is subtracted from the body.
+    Returns ``(body_pages, end_pages)``.
+    """
+    end_pages = min(1.0, 0.3 + 0.05 * page_target)  # Βιβλιογραφία (always)
+    if cfg.self_assessment:
+        end_pages += mcq_count * MCQ_PAGES_EACH + 0.3  # question + 4 options each, plus answers
+    if cfg.glossary:
+        end_pages += min(1.0, 0.3 + 0.05 * page_target)
+    body_pages = max(1, round(page_target - end_pages))
+    return body_pages, end_pages
+
+
+def build_page_budget_block(page_target: int, cfg: StructureConfig, mcq_count: int) -> str:
+    cpp = settings.chars_per_page
+    wpp = words_per_page()
+    body_pages, end_pages = page_budget(page_target, cfg, mcq_count)
+    body_words = body_pages * wpp
+    subsections = max(1, round(body_pages / 2.5))
+    ceiling = page_target + PAGE_CEILING_MARGIN
+    return f"""
+## ΠΡΟΫΠΟΛΟΓΙΣΜΟΣ ΣΕΛΙΔΩΝ (ΚΡΙΣΙΜΟ)
+1 σελίδα ≈ {cpp} χαρακτήρες ≈ {wpp} λέξεις.
+ΣΥΝΟΛΙΚΟΣ στόχος: ~{page_target} σελίδες για ΟΛΟ το τμήμα (κύριο κείμενο + {end_sections_label(cfg)}).
+- Κύριο κείμενο: ~{body_pages} σελίδες ≈ {body_words} λέξεις, σε ~{subsections} υποενότητες των ~{body_words // subsections} λέξεων.
+- Τελικές ενότητες ({end_sections_label(cfg)}): ~{math.ceil(end_pages)} σελίδες.
+ΑΠΟΛΥΤΟ ΑΝΩΤΑΤΟ ΟΡΙΟ: {ceiling} σελίδες (~{ceiling * cpp} χαρακτήρες) — η υπέρβαση θεωρείται σφάλμα.
+Προτίμησε να ολοκληρώσεις το θέμα συνοπτικά μέσα στον στόχο παρά να το επεκτείνεις.
+"""
 
 
 # =============================================================================
@@ -353,14 +410,15 @@ class LLMService(ABC):
         and changes between revisions, so message-level cache hits don't
         accrue across rounds — only the system prefix is cached.
         """
+        cfg = structure_config or StructureConfig()
         module_context = self._format_module(
             module,
             target_pages=target_pages,
             learning_outcomes=learning_outcomes,
             keywords=keywords,
+            cfg=cfg,
         )
 
-        cfg = structure_config or StructureConfig()
         system_prompt = build_system_prompt(cfg, experimental_mode)
 
         setup_prompt = f"""Παρακάτω είναι το πλαίσιο της ενότητας. Έχεις ήδη παράγει ένα draft εκπαιδευτικού υλικού και θα ακολουθήσει αίτημα στοχευμένης αναθεώρησης.
@@ -385,6 +443,7 @@ class LLMService(ABC):
   - Κάθε νέο in-text citation (Επώνυμο, Έτος) ΠΡΕΠΕΙ να έχει αντίστοιχη πλήρη βιβλιογραφική εγγραφή (APA 7th) στη Βιβλιογραφία.
   - Διατήρησε την αλφαβητική ταξινόμηση στη λίστα Βιβλιογραφίας.
   - Επιτρέπονται: peer-reviewed papers, βιβλία, επίσημες αναφορές οργανισμών, **διδακτορικές διατριβές**. ΟΧΙ πτυχιακές/μεταπτυχιακές.
+  - ΜΟΝΟ πηγές που γνωρίζεις με βεβαιότητα ότι υπάρχουν (προτίμησε θεμελιώδη έργα, καθιερωμένα εγχειρίδια, εκθέσεις διεθνών οργανισμών). DOI ΜΟΝΟ αν είσαι απολύτως βέβαιος — αλλιώς παράλειψέ το. Οι εγγραφές ελέγχονται αυτόματα σε CrossRef/OpenAlex.
 
 ### Τι μένει ως έχει
 - ΟΛΟ το υπόλοιπο κείμενο που δεν αφορούν οι ζητούμενες αλλαγές ΠΡΕΠΕΙ να μείνει ΑΥΤΟΛΕΞΕΙ ίδιο — αντίγραψέ το χαρακτήρα-προς-χαρακτήρα.
@@ -396,7 +455,7 @@ class LLMService(ABC):
 
 ### Μορφή output
 - ΜΗΝ προσθέσεις εισαγωγικά σχόλια, επεξηγήσεις ή σύνοψη αλλαγών στην απάντηση.
-- Επέστρεψε το ΠΛΗΡΕΣ αναθεωρημένο τμήμα, από την πρώτη μέχρι την τελευταία γραμμή — όχι μόνο τα τμήματα που άλλαξαν."""
+- Επέστρεψε το ΠΛΗΡΕΣ αναθεωρημένο τμήμα, από την πρώτη μέχρι την τελευταία γραμμή — όχι μόνο τα τμήματα που άλλαξαν.{build_structure_manifest(cfg)}"""
 
         messages = [
             {"role": "user", "content": setup_prompt},
@@ -473,9 +532,11 @@ class LLMService(ABC):
             learning_outcomes=learning_outcomes,
             keywords=keywords,
             occupation=occupation,
+            cfg=cfg,
         )
 
         page_target = target_pages or 20
+        cpp = settings.chars_per_page
         is_standard_mode = not module.get("skills")
 
         # Dynamic MCQ count: 20 total — proportional per batch
@@ -483,6 +544,9 @@ class LLMService(ABC):
             per_batch = 20
         else:
             per_batch = max(5, 20 // total_batches + (1 if batch_number <= 20 % total_batches else 0))
+        # The page target includes the MCQs — keep them to ~25% of the batch
+        # so small batches still leave room for the body text.
+        per_batch = min(per_batch, max(3, math.floor(page_target * MCQ_PAGE_SHARE / MCQ_PAGES_EACH)))
         mcq_instruction = f"ΑΚΡΙΒΩΣ {per_batch} ΑΡΙΘΜΗΜΕΝΕΣ ερωτήσεις πολλαπλής επιλογής (1. [Ερώτηση] α) β) γ) δ)"
 
         # Optional user instructions block
@@ -534,6 +598,8 @@ class LLMService(ABC):
             batch_title = f"\nΤίτλος: # Ενότητα {module.get('number', '')}: {module.get('title', '')} (Συνέχεια)\n"
 
         final_reminder = build_final_reminder(cfg, mcq_instruction)
+        page_block = build_page_budget_block(page_target, cfg, per_batch if cfg.self_assessment else 0)
+        manifest = build_structure_manifest(cfg)
 
         # In-text citation density directive (experimental body) — gated by config
         citation_directive = "Κάθε 2-3 παράγραφοι ΠΡΕΠΕΙ να έχουν παραπομπή." if cfg.in_text_citations else ""
@@ -549,11 +615,7 @@ class LLMService(ABC):
 {instructions_block}{continuation_block}
 Χρησιμοποίησε ΠΡΑΓΜΑΤΙΚΕΣ ακαδημαϊκές πηγές από τη γνώση σου.
 {citation_directive}
-
-Δημιούργησε ΠΕΡΙΠΟΥ {page_target} σελίδες (~{page_target * 3000} χαρακτήρες) ακαδημαϊκού περιεχομένου.
-ΜΕΓΙΣΤΟ ΟΡΙΟ: {page_target + 5} σελίδες (~{(page_target + 5) * 3000} χαρακτήρες) — ΜΗΝ υπερβείς αυτό το όριο.
-Γράψε αναλυτικά, με πλήρεις παραγράφους 200+ λέξεων.
-{final_reminder}"""
+{page_block}{final_reminder}{manifest}"""
         else:
             system_prompt = build_system_prompt(cfg)
             prompt = f"""
@@ -565,10 +627,8 @@ class LLMService(ABC):
 ## ΔΙΑΘΕΣΙΜΕΣ ΑΝΑΦΟΡΕΣ (ΧΡΗΣΙΜΟΠΟΙΗΣΕ ΜΟΝΟ ΑΥΤΕΣ)
 {formatted_refs}
 {instructions_block}{continuation_block}
-Δημιούργησε πλήρες εκπαιδευτικό υλικό ΠΕΡΙΠΟΥ {page_target} σελίδες (~{page_target * 3000} χαρακτήρες).
-ΜΕΓΙΣΤΟ ΟΡΙΟ: {page_target + 5} σελίδες (~{(page_target + 5) * 3000} χαρακτήρες) — ΜΗΝ υπερβείς αυτό το όριο.
-Γράψε αναλυτικά, με πλήρεις παραγράφους 200+ λέξεων.
-{final_reminder}"""
+Δημιούργησε πλήρες εκπαιδευτικό υλικό σύμφωνα με τον παρακάτω προϋπολογισμό σελίδων.
+{page_block}{final_reminder}{manifest}"""
 
         rate_limiter = get_rate_limiter()
         total_input_tokens = 0
@@ -618,7 +678,7 @@ class LLMService(ABC):
 Ολοκλήρωσε την τρέχουσα πρόταση/παράγραφο και μετά πρόσθεσε τα ενότητες που λείπουν:
 {chr(10).join(missing_parts) if missing_parts else "Ολοκλήρωσε το κείμενο."}
 
-ΜΗΝ επαναλάβεις περιεχόμενο που ήδη γράφτηκε. Ξεκίνα ακριβώς από εκεί που κόπηκε."""
+ΜΗΝ επαναλάβεις περιεχόμενο που ήδη γράφτηκε. Ξεκίνα ακριβώς από εκεί που κόπηκε.{manifest}"""
 
                 cont_messages = [
                     {"role": "user", "content": prompt},
@@ -635,16 +695,17 @@ class LLMService(ABC):
                 total_output_tokens += int(cont_usage.get("output_tokens", 0))
 
             # Auto-continue if content is significantly shorter than target
-            estimated_pages = len(full_text_ref[0]) // 3000
-            if estimated_pages < page_target * 0.85 and not was_truncated:
-                remaining_pages = page_target - estimated_pages
+            # (at most up to the target — never past it).
+            estimated_pages = len(full_text_ref[0]) / cpp
+            if estimated_pages < page_target * LENGTH_CONTINUE_THRESHOLD and not was_truncated:
+                remaining_pages = max(1, math.floor(page_target - estimated_pages))
                 full_text = full_text_ref[0]
                 headings = [l.strip() for l in full_text.split("\n") if l.strip().startswith("#")]
                 heading_outline = "\n".join(headings[-30:]) if headings else ""
                 last_context = full_text[-3000:]
 
-                content_continuation = f"""Το κείμενο που έγραψες είναι ~{estimated_pages} σελίδες, αλλά ο στόχος είναι ~{page_target} σελίδες.
-ΣΥΝΕΧΙΣΕ να γράφεις ~{remaining_pages} ακόμα σελίδες περιεχομένου.
+                content_continuation = f"""Το κείμενο που έγραψες είναι ~{round(estimated_pages)} σελίδες, αλλά ο στόχος είναι ~{page_target} σελίδες.
+ΣΥΝΕΧΙΣΕ με ΤΟ ΠΟΛΥ ~{remaining_pages} ακόμα σελίδες (~{remaining_pages * cpp} χαρακτήρες) — ΟΧΙ περισσότερες.
 
 ### ΕΝΟΤΗΤΕΣ ΠΟΥ ΗΔΗ ΚΑΛΥΦΘΗΚΑΝ:
 {heading_outline}
@@ -653,7 +714,7 @@ class LLMService(ABC):
 ...{last_context}
 
 ΜΗΝ επαναλάβεις υποενότητες που ήδη γράφτηκαν. Πρόσθεσε ΝΕΕΣ υποενότητες.
-Στο ΤΕΛΟΣ πρόσθεσε τις υποχρεωτικές ενότητες ({end_sections_label(cfg)}) αν λείπουν."""
+Στο ΤΕΛΟΣ πρόσθεσε τις υποχρεωτικές ενότητες ({end_sections_label(cfg)}) αν λείπουν.{manifest}"""
 
                 yield "\n\n"
 
@@ -705,6 +766,7 @@ class LLMService(ABC):
 - Αν δεν γνωρίζεις τα πλήρη στοιχεία, χρησιμοποίησε placeholder:
   π.χ. Επώνυμο, Α. Β. (Έτος). [Τίτλος δεν διατίθεται]. [Χρειάζεται επαλήθευση]
 - ΜΗΝ επινοείς ψευδή στοιχεία (DOI, τόμο, σελίδες) αν δεν τα γνωρίζεις
+- DOI ΜΟΝΟ αν είσαι απολύτως βέβαιος — αλλιώς παράλειψέ το (οι εγγραφές ελέγχονται αυτόματα σε CrossRef/OpenAlex)
 - ΜΗΝ προσθέσεις αναφορές που δεν υπάρχουν στη λίστα
 - ΑΠΑΓΟΡΕΥΟΝΤΑΙ: πτυχιακές εργασίες, μεταπτυχιακές διατριβές. ΕΠΙΤΡΕΠΟΝΤΑΙ: δημοσιευμένα άρθρα, βιβλία, εκθέσεις οργανισμών, **διδακτορικές διατριβές**
 - ΜΗΝ γράψεις τίποτα άλλο εκτός από τις εγγραφές (χωρίς εισαγωγή, χωρίς σχόλια)
@@ -714,7 +776,7 @@ class LLMService(ABC):
             text, usage = await self.complete_text(
                 system=None,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4000,
+                max_tokens=AUX_MAX_TOKENS,
             )
         await rate_limiter.tracker.record_usage(
             int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
@@ -752,7 +814,7 @@ class LLMService(ABC):
             text, usage = await self.complete_text(
                 system=None,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4000,
+                max_tokens=AUX_MAX_TOKENS,
             )
         await rate_limiter.tracker.record_usage(
             int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
@@ -826,7 +888,7 @@ class LLMService(ABC):
             text, usage = await self.complete_text(
                 system=None,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=8000,
+                max_tokens=AUX_MAX_TOKENS,
             )
         await rate_limiter.tracker.record_usage(
             int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
@@ -851,7 +913,10 @@ class LLMService(ABC):
         learning_outcomes: str = "",
         keywords: str = "",
         occupation: Optional[dict] = None,
+        cfg: Optional[StructureConfig] = None,
     ) -> str:
+        # cfg=None (multipass path) keeps the original behaviour: activities included.
+        include_activities = cfg is None or cfg.activities
         parts = [f"## Ενότητα {module.get('number', '')}: {module.get('title', '')}"]
 
         # Optional program-level ESCO occupation context — helps the model anchor
@@ -877,8 +942,9 @@ class LLMService(ABC):
 
         if target_pages:
             parts.append(
-                f"\n**Στόχος σελίδων:** ~{target_pages} σελίδες "
-                f"(~{target_pages * 3000} χαρακτήρες). Μέγιστο: {target_pages + 5} σελίδες."
+                f"\n**Στόχος σελίδων:** ~{target_pages} σελίδες συνολικά "
+                f"(~{target_pages * settings.chars_per_page} χαρακτήρες). "
+                f"Μέγιστο: {target_pages + PAGE_CEILING_MARGIN} σελίδες."
             )
 
         content = module.get("content", "")
@@ -886,7 +952,7 @@ class LLMService(ABC):
             parts.append(f"\n**Περιεχόμενο:**\n{content}")
 
         activities = module.get("activities", "")
-        if activities:
+        if activities and include_activities:
             parts.append(f"\n**Δραστηριότητες:**\n{activities}")
 
         skills = module.get("skills", [])
@@ -896,9 +962,14 @@ class LLMService(ABC):
                 for s in skills
             )
             parts.append(f"\n**Δεξιότητες ESCO:**\n{skills_text}")
+            how = (
+                "με θεωρία, παραδείγματα και πρακτική εφαρμογή"
+                if include_activities
+                else "με θεωρία και παραδείγματα εφαρμογής μέσα στο κείμενο"
+            )
             parts.append(
                 "\n**ΣΗΜΑΝΤΙΚΟ:** Το περιεχόμενο ΠΡΕΠΕΙ να καλύπτει ΟΛΕΣ τις παραπάνω δεξιότητες ESCO. "
-                "Κάθε δεξιότητα πρέπει να αναπτύσσεται με θεωρία, παραδείγματα και πρακτική εφαρμογή "
+                f"Κάθε δεξιότητα πρέπει να αναπτύσσεται {how} "
                 "ώστε να αποκτηθεί η συγκεκριμένη ικανότητα."
             )
 
@@ -937,15 +1008,19 @@ _service_instances: dict[str, LLMService] = {}
 
 
 def get_llm_service(provider: str = "claude") -> LLMService:
-    """Return a cached singleton service for the given provider."""
+    """Return a cached singleton service for the given provider.
+
+    Anything other than an enabled OpenAI falls back to Claude — including
+    stale clients (e.g. restored pending tasks) that still ask for "openai".
+    """
     provider = (provider or "claude").lower()
+    if provider != "openai" or not settings.openai_enabled:
+        provider = "claude"
     if provider not in _service_instances:
         if provider == "openai":
             from .openai_service import OpenAIService
             _service_instances[provider] = OpenAIService()
         else:
-            # default: claude
             from .claude_service import ClaudeService
-            _service_instances["claude"] = ClaudeService()
-            provider = "claude"
+            _service_instances[provider] = ClaudeService()
     return _service_instances[provider]

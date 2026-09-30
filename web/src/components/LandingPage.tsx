@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Upload,
@@ -7,8 +7,6 @@ import {
   AlertCircle,
   ChevronRight,
   ChevronDown,
-  Sparkles,
-  FlaskConical,
   BookOpen,
   Database,
   Cpu,
@@ -20,6 +18,7 @@ import {
   Edit3,
 } from 'lucide-react';
 import { useStore, type PendingTask } from '../store/useStore';
+import { checkHealth } from '../services/api';
 import { parseDocx } from '../utils/docxParser';
 import { docxToMarkdown } from '../utils/docxToMarkdown';
 import styles from './LandingPage.module.css';
@@ -48,6 +47,18 @@ export function LandingPage() {
   const [pendingOpen, setPendingOpen] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // The model picker only appears when the backend has OpenAI enabled;
+  // otherwise everything runs on Claude.
+  const [openaiEnabled, setOpenaiEnabled] = useState(false);
+  useEffect(() => {
+    checkHealth()
+      .then((health) => setOpenaiEnabled(Boolean(health.openai_enabled)))
+      .catch(() => setOpenaiEnabled(false));
+  }, []);
+  useEffect(() => {
+    if (!openaiEnabled && modelProvider === 'openai') setModelProvider('claude');
+  }, [openaiEnabled, modelProvider, setModelProvider]);
+
   const sortedPending = useMemo(
     () => [...pendingTasks].sort((a, b) => b.updatedAt - a.updatedAt),
     [pendingTasks]
@@ -58,7 +69,6 @@ export function LandingPage() {
   const [hours, setHours] = useState<number>(10);
   const [modulePages, setModulePages] = useState<number>(55);
   const [pagesPerBatch, setPagesPerBatch] = useState<number>(20);
-  const [contentMode, setContentMode] = useState<'standard' | 'experimental'>('standard');
   const [withInstructions, setWithInstructions] = useState(false);
   const [instructions, setInstructions] = useState('');
 
@@ -72,11 +82,11 @@ export function LandingPage() {
   const handleStartStandard = useCallback(() => {
     const trimmed = topic.trim();
     if (!trimmed) return;
-    setStandardModule(trimmed, hours, modulePages, pagesPerBatch, '', '', contentMode);
+    setStandardModule(trimmed, hours, modulePages, pagesPerBatch, '', '', 'experimental');
     if (withInstructions && instructions.trim()) {
       setUserInstructions(instructions.trim());
     }
-  }, [topic, hours, modulePages, pagesPerBatch, contentMode, withInstructions, instructions, setStandardModule, setUserInstructions]);
+  }, [topic, hours, modulePages, pagesPerBatch, withInstructions, instructions, setStandardModule, setUserInstructions]);
 
   // ESCO file handling
   const handleFile = useCallback(async (file: File) => {
@@ -451,51 +461,35 @@ export function LandingPage() {
                 </span>
               </div>
 
-              {/* Model Provider Toggle */}
-              <div className={styles.modeSection}>
-                <label className={styles.modeSectionLabel}>Μοντέλο</label>
-                <div className={styles.modeToggle}>
-                  <button
-                    className={`${styles.modeButton} ${modelProvider === 'claude' ? styles.modeButtonActive : ''}`}
-                    onClick={() => setModelProvider('claude')}
-                  >
-                    <Cpu size={16} />
-                    Claude Opus 5
-                  </button>
-                  <button
-                    className={`${styles.modeButton} ${modelProvider === 'openai' ? styles.modeButtonActive : ''}`}
-                    onClick={() => setModelProvider('openai')}
-                  >
-                    <Zap size={16} />
-                    GPT-5.6-sol
-                  </button>
+              {/* Model Provider Toggle — only when OpenAI is enabled on the backend */}
+              {openaiEnabled && (
+                <div className={styles.modeSection}>
+                  <label className={styles.modeSectionLabel}>Μοντέλο</label>
+                  <div className={styles.modeToggle}>
+                    <button
+                      className={`${styles.modeButton} ${modelProvider === 'claude' ? styles.modeButtonActive : ''}`}
+                      onClick={() => setModelProvider('claude')}
+                    >
+                      <Cpu size={16} />
+                      Claude Opus 5
+                    </button>
+                    <button
+                      className={`${styles.modeButton} ${modelProvider === 'openai' ? styles.modeButtonActive : ''}`}
+                      onClick={() => setModelProvider('openai')}
+                    >
+                      <Zap size={16} />
+                      GPT-5.6-sol
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Mode Toggle */}
+              {/* Generation settings */}
               <div className={styles.modeSection}>
                 <label className={styles.modeSectionLabel}>Λειτουργία Δημιουργίας</label>
-                <div className={styles.modeToggle}>
-                  <button
-                    className={`${styles.modeButton} ${contentMode === 'standard' ? styles.modeButtonActive : ''}`}
-                    onClick={() => setContentMode('standard')}
-                  >
-                    <Sparkles size={16} />
-                    Κανονική
-                  </button>
-                  <button
-                    className={`${styles.modeButton} ${styles.modeButtonExperimental} ${contentMode === 'experimental' ? styles.modeButtonActive : ''}`}
-                    onClick={() => setContentMode('experimental')}
-                  >
-                    <FlaskConical size={16} />
-                    Πειραματική
-                  </button>
-                </div>
-                {contentMode === 'experimental' && (
-                  <p className={styles.experimentalHint}>
-                    Opus μόνος - αυστηρός έλεγχος με υποχρεωτική βιβλιογραφία
-                  </p>
-                )}
+                <p className={styles.experimentalHint}>
+                  Βιβλιογραφία από τη γνώση του μοντέλου, με αυτόματο έλεγχο κάθε εγγραφής σε CrossRef/OpenAlex
+                </p>
                 <label className={styles.checkboxLabel}>
                   <input
                     type="checkbox"

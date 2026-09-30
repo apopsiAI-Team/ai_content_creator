@@ -1,15 +1,21 @@
-import type { Module, Reference, SkillCoverageReview, StructureConfig } from '../store/useStore';
+import type { BibliographyCheck, Module, Reference, SkillCoverageReview, StructureConfig } from '../store/useStore';
 import {
   generateEducationalContentStream,
   generateBibliography,
   reviewSkillCoverage,
+  verifyBibliography,
   type Occupation,
 } from './api';
+import { estimatePages } from '../utils/pages';
 
 interface GenerationResult {
   content: string;
   references: Reference[];
   pageCount: number;
+  /** Disabled structure elements the model added anyway. */
+  structureWarnings: string[];
+  /** Undefined when the verification service could not be reached. */
+  bibliographyCheck?: BibliographyCheck;
 }
 
 function extractReferencesFromContent(content: string): Reference[] {
@@ -132,11 +138,13 @@ export async function generateWithStreaming(
 ): Promise<void> {
   let fullContent = '';
   let researchRefs: Reference[] = [];
+  let structureWarnings: string[] = [];
 
   const isExperimental = contentMode === 'experimental';
   const isRevision = mode === 'revision';
-  // Revision mode never queries Research Hub — the draft already has refs.
-  const useResearchHub = !isExperimental && !isRevision;
+  // The Research Hub ('Κανονική' mode) is retired: the model cites from its own
+  // knowledge and every bibliography entry is verified after generation.
+  const useResearchHub = false;
   const instructions = userInstructions || '';
 
   await generateEducationalContentStream(
@@ -183,6 +191,7 @@ export async function generateWithStreaming(
     documentId,
     occupation,
     structureConfig,
+    (keys) => { structureWarnings = keys; },
   );
 
   // Check if bibliography section exists in the generated content
@@ -205,12 +214,27 @@ export async function generateWithStreaming(
     }
   }
 
-  const pageCount = Math.ceil(fullContent.length / 3000);
+  // Verify the bibliography against CrossRef/OpenAlex. Wrong DOIs come back
+  // corrected/removed; everything else is only flagged for the user.
+  let bibliographyCheck: BibliographyCheck | undefined;
+  try {
+    const check = await verifyBibliography(fullContent, documentId);
+    if (check.changed) fullContent = check.content;
+    bibliographyCheck = {
+      entries: check.entries,
+      orphan_citations: check.orphan_citations,
+      summary: check.summary,
+    };
+  } catch (err) {
+    console.error('Bibliography verification failed:', err);
+  }
 
   onComplete({
     content: fullContent,
     references: researchRefs.length > 0 ? researchRefs : extractReferencesFromContent(fullContent),
-    pageCount,
+    pageCount: estimatePages(fullContent),
+    structureWarnings,
+    bibliographyCheck,
   });
 }
 

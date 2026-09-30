@@ -10,9 +10,10 @@ import json
 import traceback
 
 from ..config import settings
-from ..prompts.structure import StructureConfig
+from ..prompts.structure import StructureConfig, detect_structure_violations
 from ..services.llm_service import get_llm_service
 from ..services.research_service import get_research_service
+from ..services.citation_verifier import verify_bibliography
 from ..services.esco_service import get_esco_service
 from ..rate_limiter import get_rate_limiter, Priority
 from ..auth import require_jwt
@@ -65,21 +66,22 @@ class Module(BaseModel):
 
 
 class StructureConfigModel(BaseModel):
-    """Optional structural elements to include (all default ON). The quality
-    core and the Βιβλιογραφία are always present and not configurable."""
-    activities: bool = True
-    self_assessment: bool = True
-    glossary: bool = True
-    subsection_keywords: bool = True
+    """Optional structural elements to include (on demand — only in-text
+    citations default ON). The quality core and the Βιβλιογραφία are always
+    present and not configurable."""
+    activities: bool = False
+    self_assessment: bool = False
+    glossary: bool = False
+    subsection_keywords: bool = False
     in_text_citations: bool = True
 
 
 class GenerateRequest(BaseModel):
     module: Module
-    use_research_hub: bool = True
+    use_research_hub: bool = False  # Research Hub retired from the UI — model uses its own knowledge + verification
     multipass: bool = True
     include_greek_sources: bool = True
-    experimental_mode: bool = False  # Strict anti-hallucination mode
+    experimental_mode: bool = True  # Strict anti-hallucination mode (the only mode exposed in the UI)
     user_instructions: str = ""  # Optional user guidance for content generation
     target_pages: Optional[int] = None  # Target page count (default ~20)
     learning_outcomes: str = ""  # Optional learning outcomes
@@ -236,6 +238,8 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
                 yield f"data: {json.dumps({'type': 'queue', 'position': queue_len, 'estimated_wait': int(est_wait)})}\n\n"
 
             # Stream content (rate limiting happens inside generate_content_stream)
+            structure_cfg = StructureConfig(**request.structure_config.model_dump())
+            generated: list[str] = []
             async for chunk in llm.generate_content_stream(
                 module_dict,
                 references,
@@ -251,9 +255,19 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
                 mode=request.mode,
                 current_draft=request.current_draft,
                 occupation=occupation_dict,
-                structure_config=StructureConfig(**request.structure_config.model_dump()),
+                structure_config=structure_cfg,
             ):
+                generated.append(chunk)
                 yield f"data: {json.dumps({'type': 'content', 'text': chunk})}\n\n"
+
+            # Safety net: flag disabled structural elements the model added anyway.
+            violations = detect_structure_violations("".join(generated), structure_cfg)
+            if violations:
+                _log_request(
+                    "/api/generate-stream", user_id, request.document_id,
+                    structure_violations=",".join(violations),
+                )
+                yield f"data: {json.dumps({'type': 'structure_warnings', 'data': violations})}\n\n"
 
             # Done
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -300,6 +314,38 @@ async def generate_summary(request: SummaryRequest, raw_request: Request):
         return {"summary": summary_text}
     except HTTPException:
         raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class VerifyBibliographyRequest(BaseModel):
+    content: str  # One generated batch (markdown), including its Βιβλιογραφία
+    document_id: str = ""  # Optional correlation id — stable per uploaded doc/draft session
+
+
+@router.post("/verify-bibliography")
+async def verify_bibliography_endpoint(request: VerifyBibliographyRequest, raw_request: Request):
+    """Check every bibliography entry against CrossRef/OpenAlex.
+
+    Wrong DOIs are corrected (or removed) in the returned ``content``; all
+    other problems are only flagged. No LLM call, so no rate limiting.
+    """
+    try:
+        if not request.content.strip():
+            return {"entries": [], "orphan_citations": [], "summary": {"total": 0, "verified": 0},
+                    "content": request.content, "changed": False}
+
+        user_id = _extract_user_id(raw_request)
+        result = await verify_bibliography(request.content)
+        _log_request(
+            "/api/verify-bibliography",
+            user_id,
+            request.document_id,
+            verified=f"{result['summary']['verified']}/{result['summary']['total']}",
+            orphans=len(result["orphan_citations"]),
+        )
+        return result
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

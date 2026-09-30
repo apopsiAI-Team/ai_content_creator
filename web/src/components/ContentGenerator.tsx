@@ -34,6 +34,7 @@ import { exportGeneratedMaterialToPlatform, generateSummary } from '../services/
 import { exportToWord } from '../utils/wordExport';
 import { SkillCoverageReview } from './SkillCoverageReview';
 import { BatchFeedbackDialog } from './BatchFeedbackDialog';
+import { BatchChecks } from './BatchChecks';
 import styles from './ContentGenerator.module.css';
 
 function ConfirmResetDialog({ isOpen, onConfirm, onCancel }: { isOpen: boolean; onConfirm: () => void; onCancel: () => void }) {
@@ -182,7 +183,7 @@ export function ContentGenerator() {
         .filter((b) => b.status === 'approved')
         .reduce((sum, b) => sum + b.pageCount, 0);
       const remainingPages = totalModulePages > 0
-        ? Math.max(targetPages > 0 ? Math.min(targetPages, totalModulePages - approvedPages) : totalModulePages - approvedPages, 5)
+        ? Math.max(targetPages > 0 ? Math.min(targetPages, totalModulePages - approvedPages) : totalModulePages - approvedPages, 1)
         : targetPages;
       effectiveTarget = remainingPages > 0 ? remainingPages : targetPages;
     }
@@ -210,6 +211,8 @@ export function ContentGenerator() {
             references: result.references,
             pageCount: result.pageCount,
             status: 'pending',
+            structureWarnings: result.structureWarnings,
+            bibliographyCheck: result.bibliographyCheck,
           });
           setStreamingContent('');
           setShowInstructionInput(false);
@@ -409,9 +412,8 @@ export function ContentGenerator() {
     [selectedModule, module, moduleBatches, documentTitle, currentReview, updateBatchStatus, setProductionComplete, setModuleSummary, setIsGeneratingSummary, modelProvider, currentTaskId]
   );
 
-  const handleFeedbackSubmit = useCallback(async (feedback: string) => {
-    const batchNumber = feedbackDialogBatch;
-    if (!module || !batchNumber) return;
+  const runRevision = useCallback(async (batchNumber: number, feedback: string) => {
+    if (!module) return;
 
     // Revision mode: send the existing draft as assistant turn + the feedback
     // as a targeted edit instruction. The model keeps untouched sections verbatim.
@@ -440,7 +442,10 @@ export function ContentGenerator() {
           setStreamingContent((prev) => prev + chunk);
         },
         (result) => {
-          updateBatchContent(module.number, batchNumber, result.content, result.references, result.pageCount);
+          updateBatchContent(module.number, batchNumber, result.content, result.references, result.pageCount, {
+            structureWarnings: result.structureWarnings,
+            bibliographyCheck: result.bibliographyCheck,
+          });
           setStreamingContent('');
         },
         targetPages,
@@ -466,7 +471,11 @@ export function ContentGenerator() {
       setIsGenerating(false);
       clearQueueStatus();
     }
-  }, [feedbackDialogBatch, module, moduleBatches, contentMode, approvedReferences, getApprovedContent, setIsGenerating, updateBatchContent, targetPages, learningOutcomes, keywords, totalBatches, setQueueStatus, clearQueueStatus, modelProvider, currentTaskId, structureConfig]);
+  }, [module, moduleBatches, contentMode, approvedReferences, getApprovedContent, setIsGenerating, updateBatchContent, targetPages, learningOutcomes, keywords, totalBatches, setQueueStatus, clearQueueStatus, modelProvider, currentTaskId, structureConfig]);
+
+  const handleFeedbackSubmit = useCallback((feedback: string) => {
+    if (feedbackDialogBatch) runRevision(feedbackDialogBatch, feedback);
+  }, [feedbackDialogBatch, runRevision]);
 
   const handleExport = useCallback(async () => {
     if (!module) return;
@@ -635,6 +644,15 @@ export function ContentGenerator() {
                 <div className={styles.batchPreview}>
                   {batch.content.substring(0, 200)}...
                 </div>
+
+                <BatchChecks
+                  batch={batch}
+                  targetPages={targetPages}
+                  showPageWarning={!isEditDoc}
+                  canFix={batch.status === 'pending'}
+                  disabled={isGenerating}
+                  onFix={(instruction) => runRevision(batch.batchNumber, instruction)}
+                />
 
                 {batch.status === 'pending' && (
                   <>

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { estimatePages } from '../utils/pages';
 
 export interface ESCOSkill {
   code: string;
@@ -36,6 +37,36 @@ export interface GeneratedContent {
   references: Reference[];
   pageCount: number;
   status: 'pending' | 'approved' | 'rejected' | 'generating';
+  /** Disabled structure elements the model added anyway (keys of StructureConfig). */
+  structureWarnings?: string[];
+  /** CrossRef/OpenAlex verification of the batch's Βιβλιογραφία. */
+  bibliographyCheck?: BibliographyCheck;
+}
+
+export type BibliographyEntryStatus =
+  | 'verified'
+  | 'doi_corrected'
+  | 'doi_invalid'
+  | 'unverified'
+  | 'placeholder'
+  | 'thesis';
+
+export interface BibliographyEntryCheck {
+  text: string;
+  status: BibliographyEntryStatus;
+  /** The work itself was found in CrossRef/OpenAlex. */
+  verified: boolean;
+  doi: string | null;
+  suggested_doi: string | null;
+  matched_title: string | null;
+  source: string | null;
+  cited: boolean;
+}
+
+export interface BibliographyCheck {
+  entries: BibliographyEntryCheck[];
+  orphan_citations: string[];
+  summary: { total: number; verified: number };
 }
 
 export interface SkillAnalysis {
@@ -75,11 +106,12 @@ export interface StructureConfig {
   in_text_citations: boolean;   // Υποχρεωτικές παρενθετικές αναφορές (Επώνυμο, Έτος)
 }
 
+// Optional elements are on demand — only in-text citations are ON by default.
 export const DEFAULT_STRUCTURE_CONFIG: StructureConfig = {
-  activities: true,
-  self_assessment: true,
-  glossary: true,
-  subsection_keywords: true,
+  activities: false,
+  self_assessment: false,
+  glossary: false,
+  subsection_keywords: false,
   in_text_citations: true,
 };
 
@@ -213,7 +245,14 @@ export interface AppState {
   setModuleHours: (moduleNumber: number, hours: number) => void;
   setQueueStatus: (position: number, wait: number) => void;
   clearQueueStatus: () => void;
-  updateBatchContent: (moduleNumber: number, batchNumber: number, content: string, references: Reference[], pageCount: number) => void;
+  updateBatchContent: (
+    moduleNumber: number,
+    batchNumber: number,
+    content: string,
+    references: Reference[],
+    pageCount: number,
+    checks?: Pick<GeneratedContent, 'structureWarnings' | 'bibliographyCheck'>,
+  ) => void;
   loadPendingTask: (id: string) => void;
   deletePendingTask: (id: string) => void;
   reset: () => void;
@@ -236,7 +275,8 @@ const activeStateDefaults = {
   generatedBatches: [] as GeneratedContent[],
   isGenerating: false,
   generationProgress: 0,
-  contentMode: 'standard' as const,
+  // 'Κανονική' (Research Hub) mode is retired from the UI — always experimental.
+  contentMode: 'experimental' as const,
   userInstructions: '',
   pendingReferences: [] as Reference[],
   approvedReferences: [] as Reference[],
@@ -384,7 +424,7 @@ export const useStore = create<AppState>()(
       // pre-loaded as a single "pending" batch. User can iterate via "Αλλαγές"
       // (revision mode) and then export. Reuses workflowMode='standard'.
       loadDocForEditing: (title, markdown) => set((state) => {
-        const estimatedPages = Math.max(1, Math.ceil(markdown.length / 3000));
+        const estimatedPages = estimatePages(markdown);
         const taskId = makeTaskId();
         const pendingBatch: GeneratedContent = {
           moduleNumber: 1,
@@ -416,7 +456,7 @@ export const useStore = create<AppState>()(
           learningOutcomes: '',
           keywords: '',
           isEditDoc: true,
-          contentMode: 'standard',
+          contentMode: 'experimental',
           generatedBatches: [pendingBatch],
           currentBatch: 2,
           currentStep: 'generate',
@@ -567,12 +607,20 @@ export const useStore = create<AppState>()(
 
       clearQueueStatus: () => set({ queuePosition: null, estimatedWait: null }),
 
-      updateBatchContent: (moduleNumber, batchNumber, content, references, pageCount) => set((state) => {
+      updateBatchContent: (moduleNumber, batchNumber, content, references, pageCount, checks) => set((state) => {
         const next: AppState = {
           ...state,
           generatedBatches: state.generatedBatches.map((batch) =>
             batch.moduleNumber === moduleNumber && batch.batchNumber === batchNumber
-              ? { ...batch, content, references, pageCount, status: 'pending' as const }
+              ? {
+                  ...batch,
+                  content,
+                  references,
+                  pageCount,
+                  status: 'pending' as const,
+                  structureWarnings: checks?.structureWarnings,
+                  bibliographyCheck: checks?.bibliographyCheck,
+                }
               : batch
           ),
         };
@@ -603,7 +651,7 @@ export const useStore = create<AppState>()(
           selectedModule: task.selectedModule ?? (task.modules[0]?.number ?? null),
           currentBatch: task.currentBatch,
           generatedBatches: task.generatedBatches,
-          contentMode: task.contentMode,
+          contentMode: 'experimental',
           userInstructions: task.userInstructions,
           approvedReferences: task.approvedReferences,
           skillReviews: task.skillReviews,
