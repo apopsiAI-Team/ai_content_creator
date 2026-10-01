@@ -63,9 +63,11 @@ export interface BibliographyEntryCheck {
   cited: boolean;
   /** Sentences of the batch that cite this entry. */
   contexts?: string[];
-  /** Does the source support the sentences citing it? (small-model judgement) */
-  relevance?: 'supports' | 'general' | 'unrelated' | 'uncertain';
+  /** Does the source support the sentences citing it — or, in text without
+   *  in-text citations, the module's topic? (small-model judgement) */
+  relevance?: 'supports' | 'general' | 'related' | 'unrelated' | 'uncertain';
   relevance_reason?: string;
+  relevance_scope?: 'sentence' | 'topic';
 }
 
 export interface BibliographyCheck {

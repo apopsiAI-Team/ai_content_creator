@@ -43,13 +43,51 @@ def test_uncited_entries_and_relevance_annotation(monkeypatch):
     assert "abstract" not in result["entries"][0]  # internal field stripped
 
 
-def test_no_uncited_flags_when_text_has_no_citations(monkeypatch):
+def test_no_citations_skips_uncited_and_runs_the_topic_check(monkeypatch):
     async def fake_verify(client, entry, semaphore=None):
         return cv._result(entry, "verified", True)
 
+    calls = {}
+
+    async def fake_sentence_check(results, user_id="anonymous"):
+        calls["sentence"] = True
+
+    async def fake_topic_check(results, topic, headings, user_id="anonymous"):
+        calls["topic"] = (topic, headings)
+
     monkeypatch.setattr(cv, "verify_entry", fake_verify)
+    monkeypatch.setattr(cv, "assess_relevance", fake_sentence_check)
+    monkeypatch.setattr(cv, "assess_topic_relevance", fake_topic_check)
     no_cites = CONTENT.replace(" (Davis, 1989)", "")
-    assert asyncio.run(cv.verify_bibliography(no_cites))["uncited_entries"] == []
+    result = asyncio.run(cv.verify_bibliography(no_cites, topic="Ενεργειακή απόδοση κτιρίων"))
+
+    assert result["uncited_entries"] == []          # every entry is uncited by design
+    assert "sentence" not in calls                  # no (source, sentence) pairs
+    assert calls["topic"] == ("Ενεργειακή απόδοση κτιρίων", ["1.1 Θέμα"])
+
+
+def test_topic_check_marks_off_topic_sources(monkeypatch):
+    reply = '{"results": [{"id": 1, "verdict": "unrelated", "reason": "ιατρική, όχι ενέργεια"}, {"id": 2, "verdict": "related", "reason": "ενέργεια κτιρίων"}]}'
+
+    async def create(**kwargs):
+        prompt = kwargs["messages"][0]["content"]
+        assert "ΘΕΜΑ ΕΝΟΤΗΤΑΣ: Ενέργεια" in prompt and "- 1.1 Βασικές έννοιες" in prompt
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=reply)],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=10),
+        )
+
+    monkeypatch.setattr(rel, "_get_client", lambda: SimpleNamespace(messages=SimpleNamespace(create=create)))
+    monkeypatch.setattr(rel.settings, "anthropic_api_key", "test")
+    results = [
+        {"text": "Gray's anatomy (2020)", "status": "verified"},
+        {"text": "Pérez-Lombard (2008)", "status": "verified"},
+        {"text": "Κάποιος (2020) [Χρειάζεται επαλήθευση]", "status": "placeholder"},
+    ]
+    asyncio.run(rel.assess_topic_relevance(results, "Ενέργεια", ["1.1 Βασικές έννοιες"]))
+    assert (results[0]["relevance"], results[0]["relevance_scope"]) == ("unrelated", "topic")
+    assert results[1]["relevance"] == "related"
+    assert "relevance" not in results[2]  # placeholders are not judged
 
 
 def test_assess_relevance_parses_model_verdicts(monkeypatch):

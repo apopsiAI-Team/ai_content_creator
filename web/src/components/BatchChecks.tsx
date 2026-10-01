@@ -55,10 +55,20 @@ function fixBibliographyInstruction(
         'ενημερώνοντας ΚΑΙ τις αντίστοιχες ενδοκειμενικές αναφορές. DOI μόνο αν είσαι απολύτως βέβαιος.',
     );
   }
-  if (unrelated.length > 0) {
+  const offTopic = unrelated.filter((e) => e.relevance_scope === 'topic');
+  const unsupported = unrelated.filter((e) => e.relevance_scope !== 'topic');
+  if (offTopic.length > 0) {
+    parts.push(
+      'Οι παρακάτω πηγές της Βιβλιογραφίας είναι ΕΚΤΟΣ ΘΕΜΑΤΟΣ της ενότητας:\n' +
+        offTopic.map((e) => `- ${e.text}`).join('\n') +
+        '\nΑντικατάστησέ τες με πραγματικές πηγές που αφορούν το θέμα (μόνο αν τις γνωρίζεις με βεβαιότητα) ' +
+        'ή αφαίρεσέ τες από τη Βιβλιογραφία.',
+    );
+  }
+  if (unsupported.length > 0) {
     parts.push(
       'Οι παρακάτω πηγές είναι πραγματικές, αλλά ΔΕΝ τεκμηριώνουν τις προτάσεις που τις επικαλούνται:\n' +
-        unrelated
+        unsupported
           .map((e) => `- ${e.text}\n  Προτάσεις: ${(e.contexts ?? []).map((c) => `«${c}»`).join(' ')}`)
           .join('\n') +
         '\nΣε κάθε τέτοια πρόταση, αντικατάστησε την παραπομπή με πηγή που πραγματεύεται ΑΜΕΣΑ τον ισχυρισμό ' +
@@ -101,6 +111,8 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
   const check = batch.bibliographyCheck;
   const flagged = check ? check.entries.filter(needsAttention) : [];
   const unrelated = check ? check.entries.filter(isUnrelated) : [];
+  const offTopic = unrelated.filter((e) => e.relevance_scope === 'topic');
+  const unsupported = unrelated.filter((e) => e.relevance_scope !== 'topic');
   const uncited = check?.uncited_entries ?? [];
   const orphans = check?.orphan_citations ?? [];
   const corrected = check ? check.entries.filter((e) => e.status === 'doi_corrected' || e.status === 'doi_invalid') : [];
@@ -148,7 +160,8 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
             <BookCheck size={14} />
             <span>
               Βιβλιογραφία: {check.summary.verified}/{check.summary.total} επαληθευμένες
-              {unrelated.length > 0 && ` · ${unrelated.length} δεν τεκμηριώνουν το κείμενο`}
+              {unsupported.length > 0 && ` · ${unsupported.length} δεν τεκμηριώνουν το κείμενο`}
+              {offTopic.length > 0 && ` · ${offTopic.length} εκτός θέματος`}
               {uncited.length > 0 && ` · ${uncited.length} χωρίς παραπομπή στο κείμενο`}
               {orphans.length > 0 && ` · ${orphans.length} αναφορές χωρίς εγγραφή`}
             </span>
@@ -165,7 +178,9 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
               ))}
               {unrelated.map((entry) => (
                 <div key={`rel-${entry.text}`} className={styles.entry}>
-                  <span className={styles.entryStatus}>Δεν τεκμηριώνει το κείμενο</span>
+                  <span className={styles.entryStatus}>
+                    {entry.relevance_scope === 'topic' ? 'Εκτός θέματος ενότητας' : 'Δεν τεκμηριώνει το κείμενο'}
+                  </span>
                   <span className={styles.entryText}>{entry.text}</span>
                   {entry.relevance_reason && (
                     <span className={styles.entryReason}>{entry.relevance_reason}</span>

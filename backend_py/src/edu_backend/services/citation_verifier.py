@@ -29,7 +29,7 @@ import httpx
 
 from ..config import settings
 from .research_service import THESIS_KEYWORDS
-from .citation_relevance import assess_relevance
+from .citation_relevance import assess_relevance, assess_topic_relevance
 
 TITLE_MATCH_THRESHOLD = 0.85
 HTTP_TIMEOUT_SECONDS = 8.0
@@ -511,7 +511,14 @@ def _apply_doi_fixes(content: str, results: list[dict]) -> str:
     return content
 
 
-async def verify_bibliography(content: str, user_id: str = "anonymous") -> dict:
+def _headings(body: str) -> list[str]:
+    return [
+        line.lstrip("#").strip() for line in body.split("\n")
+        if line.startswith("#") and line.lstrip("#").strip()
+    ]
+
+
+async def verify_bibliography(content: str, user_id: str = "anonymous", topic: str = "") -> dict:
     body, _ = _split_sections(content)
     entries = parse_bibliography(content)
 
@@ -551,6 +558,11 @@ async def verify_bibliography(content: str, user_id: str = "anonymous") -> dict:
                 if year == entry.year and _names_match(aliases, entry.aliases)
             ))[:3]
         await assess_relevance(results, user_id)
+    elif results:
+        # No in-text citations (turned off): no (source, sentence) pairs exist,
+        # so judge each source against the module's topic and headings instead.
+        headings = _headings(body)
+        await assess_topic_relevance(results, topic or (headings[0] if headings else ""), headings, user_id)
 
     for res in results:
         res.pop("abstract", None)

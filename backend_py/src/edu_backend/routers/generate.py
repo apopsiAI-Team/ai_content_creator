@@ -328,6 +328,7 @@ async def generate_summary(request: SummaryRequest, raw_request: Request):
 
 class VerifyBibliographyRequest(BaseModel):
     content: str  # One generated batch (markdown), including its Βιβλιογραφία
+    topic: str = ""  # Module title — used to judge sources when the text has no in-text citations
     document_id: str = ""  # Optional correlation id — stable per uploaded doc/draft session
 
 
@@ -344,7 +345,7 @@ async def verify_bibliography_endpoint(request: VerifyBibliographyRequest, raw_r
                     "content": request.content, "changed": False}
 
         user_id = _extract_user_id(raw_request)
-        result = await verify_bibliography(request.content, user_id)
+        result = await verify_bibliography(request.content, user_id, request.topic)
         _log_request(
             "/api/verify-bibliography",
             user_id,

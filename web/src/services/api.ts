@@ -341,11 +341,12 @@ export interface VerifyBibliographyResult extends BibliographyCheck {
 export async function verifyBibliography(
   content: string,
   documentId = '',
+  topic = '',
 ): Promise<VerifyBibliographyResult> {
   const response = await fetch(apiUrl('/api/verify-bibliography'), {
     method: 'POST',
     headers: apiHeaders(),
-    body: JSON.stringify({ content, document_id: documentId }),
+    body: JSON.stringify({ content, document_id: documentId, topic }),
   });
 
   if (!response.ok) {

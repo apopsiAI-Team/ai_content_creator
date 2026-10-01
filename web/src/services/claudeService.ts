@@ -221,7 +221,7 @@ export async function generateWithStreaming(
   // corrected/removed; everything else is only flagged for the user.
   let bibliographyCheck: BibliographyCheck | undefined;
   try {
-    const check = await verifyBibliography(fullContent, documentId);
+    const check = await verifyBibliography(fullContent, documentId, module.title);
     if (check.changed) fullContent = check.content;
     bibliographyCheck = {
       entries: check.entries,
