@@ -137,3 +137,13 @@ def test_negated_mentions_are_prohibitions_not_requests():
 def test_negated_instruction_still_flags_the_element():
     text = "**Δραστηριότητα 1: Άσκηση**\n"
     assert detect_structure_violations(text, StructureConfig(), "Μην βάλεις δραστηριότητες") == ["activities"]
+
+
+def test_summary_scales_with_module_and_is_reserved_in_the_budget():
+    from edu_backend.services.llm_service import summary_word_target
+    assert summary_word_target(7) == 150          # small module → short summary
+    assert summary_word_target(55) == 784         # ~5% of 55 pages
+    assert summary_word_target(200) == 800        # capped
+    body, _ = page_budget(7, StructureConfig(), 0)
+    body_last, _ = page_budget(7, StructureConfig(), 0, reserved_pages=150 / 285)
+    assert body_last < body

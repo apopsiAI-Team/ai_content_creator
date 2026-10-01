@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # CHARS_PER_PAGE in web/src/utils/pages.ts.
     chars_per_page: int = 2000
 
+    # Small, cheap model that judges whether each cited source supports the
+    # sentences citing it (services/citation_relevance.py).
+    relevance_model_id: str = "claude-haiku-4-5-20251001"
+
     # Contact address sent in the User-Agent to CrossRef/OpenAlex (polite pool)
     crossref_mailto: str = "contact@example.com"
 

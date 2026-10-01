@@ -135,6 +135,8 @@ export async function generateWithStreaming(
   documentId = '',
   occupation: Occupation | null = null,
   structureConfig?: StructureConfig,
+  /** Requested pages for the whole module — sizes the summary reserved in the last batch. */
+  totalPages?: number,
 ): Promise<void> {
   let fullContent = '';
   let researchRefs: Reference[] = [];
@@ -192,6 +194,7 @@ export async function generateWithStreaming(
     occupation,
     structureConfig,
     (keys) => { structureWarnings = keys; },
+    totalPages,
   );
 
   // Check if bibliography section exists in the generated content
@@ -223,6 +226,7 @@ export async function generateWithStreaming(
     bibliographyCheck = {
       entries: check.entries,
       orphan_citations: check.orphan_citations,
+      uncited_entries: check.uncited_entries ?? [],
       summary: check.summary,
     };
   } catch (err) {

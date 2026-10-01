@@ -72,6 +72,7 @@ Only `experimental` is exposed in the UI (the "Κανονική"/`standard` Rese
 
 - `experimental` — Anti-hallucination prompt (`EXPERIMENTAL_SYSTEM_PROMPT` in `prompts/system_prompt.py`); the model cites real sources from its own knowledge (seminal works/textbooks → official reports → highly cited articles), DOI only when certain, theses forbidden, full APA bibliography mandatory.
 - **Bibliography verification** — after every batch the frontend calls `POST /api/verify-bibliography` (`services/citation_verifier.py`): each entry is checked against CrossRef → OpenAlex → Open Library (books), or its cited URL must resolve (reports). Wrong DOIs are corrected (same year ±1 only) or removed in the content; unverified entries, placeholders, theses and in-text citations without an entry are flagged on the batch card, with a one-click revision to replace them.
+- **Citation support** — existence is not enough, so the same endpoint also flags (a) bibliography entries never cited in the text (`uncited_entries`; only when the text uses in-text citations) and (b) real sources that do not support the sentences citing them: `services/citation_relevance.py` sends each cited entry's title + abstract (from CrossRef/OpenAlex) and its citing sentences to a small model (`settings.relevance_model_id`, Haiku 4.5) in one call per batch → `relevance` ∈ `supports | general | unrelated | uncertain`. Only `unrelated` is surfaced. It catches gross topic mismatches, not wrong page-level details (no full texts).
 
 `userInstructions` is an independent free-text steer.
 
@@ -91,7 +92,7 @@ Optional elements are **on demand**: `activities`, `self_assessment`, `glossary`
 3. Frontend (`claudeService.generateWithStreaming`) accumulates the text and, **if no Bibliography section landed**, scrapes in-text citations from the body and calls `POST /api/generate-bibliography` to synthesize an APA list as a fallback. It then calls `POST /api/verify-bibliography` and stores the result on the batch (`bibliographyCheck`).
 4. User approves/rejects each batch; rejected batches are regenerated; pages add up to `totalModulePages`.
 5. ESCO mode: after all batches are approved, frontend calls `POST /api/review` for skill-coverage analysis (`SkillCoverageReview` rendered by `SkillCoverageReview.tsx`).
-6. **Approve & Finish** triggers `POST /api/generate-summary` (Περίληψη, 500–800 words) over the concatenated approved content.
+6. **Approve & Finish** triggers `POST /api/generate-summary` (Περίληψη) over the concatenated approved content. Its length scales with the module (`summary_word_target`: ~5% of `total_pages`, 150–800 words).
 7. `wordExport.exportToWord` consolidates all batches into a single `.docx`: renumbered MCQs across batches, deduped alphabetical bibliography, merged glossary, the generated Περίληψη before the bibliography, optional TOC and page numbers, APOPSI e-learning branding.
 
 ### Backend layout (`backend_py/src/edu_backend/`)
@@ -100,7 +101,8 @@ Optional elements are **on demand**: `activities`, `self_assessment`, `glossary`
 - `rate_limiter.py` — Semaphore-based concurrency control + sliding-window token tracker; tier-aware (2/3/4); `Priority.HEAVY` (content gen) vs `Priority.LIGHT` (summary/bibliography/review); per-user caps; emits queue position to frontend
 - `services/claude_service.py` — All Anthropic calls. Prompts cached via `cache_control: ephemeral` (90% cost reduction, ~5 min TTL). Stream retries with exponential backoff + jitter for 429/5xx/overload.
 - `services/research_service.py` — CrossRef + Rust hub queries; thesis/dissertation filtering; English keyword translation for Greek-language queries
-- `services/citation_verifier.py` — Bibliography verification (CrossRef / OpenAlex / Open Library / URL check), DOI correction, orphan-citation detection
+- `services/citation_verifier.py` — Bibliography verification (CrossRef / OpenAlex / Open Library / URL check), DOI correction, orphan/uncited-citation detection
+- `services/citation_relevance.py` — Small-model check that each cited source supports its citing sentences
 - `prompts/structure.py` — `StructureConfig`, prompt stripping + manifest for disabled elements, `detect_structure_violations`
 - `services/esco_service.py` — Loads `data/skills_compact.json` (preprocessed Greek ESCO skills); name lookup + partial search
 - `prompts/system_prompt.py` — `SYSTEM_PROMPT`, `OUTLINE_PROMPT`, `EXPAND_PROMPT`, `CITATIONS_PROMPT`, `REVIEW_PROMPT`, `STANDARD_CONTENT_STRUCTURE`
@@ -155,7 +157,7 @@ VITE_API_URL=http://localhost:8000   # default: same-origin
 - **Per-batch sections:** Σκοπός → Προσδοκώμενα → Λέξεις Κλειδιά → (Εισαγωγή only batch 1) → Υποενότητες → [MCQs] → Βιβλιογραφία → [Γλωσσάρι] (bracketed = only when enabled in `structureConfig`).
 - **Dynamic MCQ count** (only when `self_assessment` is ON): 20 total per module, distributed proportionally across batches (`per_batch = max(5, 20 // total_batches + ...)`), capped so MCQs take ≤ ~25% of the batch's pages (`floor(target × 0.25 / 0.18)`).
 - **Continuation between batches:** for batch > 1, the previous content's headings + last 3000 chars are injected with explicit "ΣΥΝΕΧΙΣΕ ΑΠΟ ΕΔΩ" + "ΜΗΝ επαναλάβεις" guards.
-- **Page sizing:** one page = `chars_per_page` = **2000 chars** (what fits on a page of the exported .docx: Calibri 12pt, 1.5 spacing). Keep `settings.chars_per_page` and `CHARS_PER_PAGE` (`web/src/utils/pages.ts`) in sync. The page target covers the **whole batch** (body + MCQs + bibliography + glossary): `page_budget()` subtracts the enabled end sections and the prompt states body pages, word count, subsection count, and a hard ceiling of `target_pages + 5`. MCQs are capped at ~25% of a batch's pages. The last batch requests only the remaining pages (min 1).
+- **Page sizing:** one page = `chars_per_page` = **2000 chars** (what fits on a page of the exported .docx: Calibri 12pt, 1.5 spacing). Keep `settings.chars_per_page` and `CHARS_PER_PAGE` (`web/src/utils/pages.ts`) in sync. The page target covers the **whole batch** (body + MCQs + bibliography + glossary): `page_budget()` subtracts the enabled end sections and the prompt states body pages, word count, subsection count, and a hard ceiling of `target_pages + 5`. MCQs are capped at ~25% of a batch's pages. The last batch requests only the remaining pages (min 1) and also reserves room for the module summary. The cover page and table of contents of the Word export are not counted.
 - **Greek language throughout**, APA 7th, **parenthetical citations only** (the system prompt forbids "Σύμφωνα με τον X..." and forces "et al.", never "κ.ά.").
 - **Forbidden source types:** undergraduate / master's / doctoral theses are filtered out both by the prompt and by `research_service._filter_theses`.
 

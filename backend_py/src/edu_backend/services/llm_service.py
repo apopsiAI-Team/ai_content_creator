@@ -49,6 +49,13 @@ LENGTH_CONTINUE_THRESHOLD = 0.7
 # One MCQ (question + 4 options) ≈ 0.18 page; MCQs may take ≤ 25% of a batch.
 MCQ_PAGES_EACH = 0.18
 MCQ_PAGE_SHARE = 0.25
+# The module summary (Περίληψη) scales with the module: ~5% of its pages,
+# 150–800 words. Its space is reserved in the last batch's page budget.
+SUMMARY_PAGE_SHARE = 0.05
+SUMMARY_MIN_WORDS = 150
+SUMMARY_MAX_WORDS = 800
+SUMMARY_DEFAULT_WORDS = 650  # when the module size is unknown
+
 # Cap for the non-streaming auxiliary calls (summary, bibliography, ESCO review).
 # Adaptive thinking counts against max_tokens, so leave room beyond the visible text.
 AUX_MAX_TOKENS = 16000
@@ -58,34 +65,47 @@ def words_per_page() -> int:
     return max(1, settings.chars_per_page // CHARS_PER_WORD)
 
 
-def page_budget(page_target: int, cfg: StructureConfig, mcq_count: int) -> tuple[int, float]:
+def summary_word_target(total_pages: Optional[int]) -> int:
+    """Length of the module summary, proportional to the module's pages."""
+    if not total_pages:
+        return SUMMARY_DEFAULT_WORDS
+    words = round(total_pages * SUMMARY_PAGE_SHARE * words_per_page())
+    return max(SUMMARY_MIN_WORDS, min(SUMMARY_MAX_WORDS, words))
+
+
+def page_budget(
+    page_target: int, cfg: StructureConfig, mcq_count: int, reserved_pages: float = 0.0
+) -> tuple[float, float]:
     """Split the batch page target between body text and the end sections.
 
-    The requested page count covers EVERYTHING in the exported .docx, so the
-    space taken by MCQs, bibliography and glossary is subtracted from the body.
-    Returns ``(body_pages, end_pages)``.
+    The requested page count covers everything in the exported .docx except
+    the cover and table of contents, so the space taken by MCQs, bibliography,
+    glossary and ``reserved_pages`` (the module summary, in the last batch) is
+    subtracted from the body. Returns ``(body_pages, end_pages)``.
     """
     end_pages = min(1.0, 0.3 + 0.05 * page_target)  # Βιβλιογραφία (always)
     if cfg.self_assessment:
         end_pages += mcq_count * MCQ_PAGES_EACH + 0.3  # question + 4 options each, plus answers
     if cfg.glossary:
         end_pages += min(1.0, 0.3 + 0.05 * page_target)
-    body_pages = max(1, round(page_target - end_pages))
+    body_pages = max(1.0, page_target - end_pages - reserved_pages)
     return body_pages, end_pages
 
 
-def build_page_budget_block(page_target: int, cfg: StructureConfig, mcq_count: int) -> str:
+def build_page_budget_block(
+    page_target: int, cfg: StructureConfig, mcq_count: int, reserved_pages: float = 0.0
+) -> str:
     cpp = settings.chars_per_page
     wpp = words_per_page()
-    body_pages, end_pages = page_budget(page_target, cfg, mcq_count)
-    body_words = body_pages * wpp
+    body_pages, end_pages = page_budget(page_target, cfg, mcq_count, reserved_pages)
+    body_words = round(body_pages * wpp)
     subsections = max(1, round(body_pages / 2.5))
     ceiling = page_target + PAGE_CEILING_MARGIN
     return f"""
 ## ΠΡΟΫΠΟΛΟΓΙΣΜΟΣ ΣΕΛΙΔΩΝ (ΚΡΙΣΙΜΟ)
 1 σελίδα ≈ {cpp} χαρακτήρες ≈ {wpp} λέξεις.
 ΣΥΝΟΛΙΚΟΣ στόχος: ~{page_target} σελίδες για ΟΛΟ το τμήμα (κύριο κείμενο + {end_sections_label(cfg)}).
-- Κύριο κείμενο: ~{body_pages} σελίδες ≈ {body_words} λέξεις, σε ~{subsections} υποενότητες των ~{body_words // subsections} λέξεων.
+- Κύριο κείμενο: ~{max(1, round(body_pages))} σελίδες ≈ {body_words} λέξεις, σε ~{subsections} υποενότητες των ~{body_words // subsections} λέξεων.
 - Τελικές ενότητες ({end_sections_label(cfg)}): ~{math.ceil(end_pages)} σελίδες.
 ΑΠΟΛΥΤΟ ΑΝΩΤΑΤΟ ΟΡΙΟ: {ceiling} σελίδες (~{ceiling * cpp} χαρακτήρες) — η υπέρβαση θεωρείται σφάλμα.
 Προτίμησε να ολοκληρώσεις το θέμα συνοπτικά μέσα στον στόχο παρά να το επεκτείνεις.
@@ -446,6 +466,7 @@ class LLMService(ABC):
   - Διατήρησε την αλφαβητική ταξινόμηση στη λίστα Βιβλιογραφίας.
   - Επιτρέπονται: peer-reviewed papers, βιβλία, επίσημες αναφορές οργανισμών, **διδακτορικές διατριβές**. ΟΧΙ πτυχιακές/μεταπτυχιακές.
   - ΜΟΝΟ πηγές που γνωρίζεις με βεβαιότητα ότι υπάρχουν (προτίμησε θεμελιώδη έργα, καθιερωμένα εγχειρίδια, εκθέσεις διεθνών οργανισμών). DOI ΜΟΝΟ αν είσαι απολύτως βέβαιος — αλλιώς παράλειψέ το. Οι εγγραφές ελέγχονται αυτόματα σε CrossRef/OpenAlex.
+  - Κάθε νέα παραπομπή ΜΟΝΟ σε πηγή που πραγματεύεται ΑΜΕΣΑ τον ισχυρισμό της πρότασης.
 
 ### Τι μένει ως έχει
 - ΟΛΟ το υπόλοιπο κείμενο που δεν αφορούν οι ζητούμενες αλλαγές ΠΡΕΠΕΙ να μείνει ΑΥΤΟΛΕΞΕΙ ίδιο — αντίγραψέ το χαρακτήρα-προς-χαρακτήρα.
@@ -502,6 +523,7 @@ class LLMService(ABC):
         current_draft: str = "",
         occupation: Optional[dict] = None,
         structure_config: Optional[StructureConfig] = None,
+        total_pages: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream content generation with auto-continuation if truncated.
 
@@ -600,7 +622,14 @@ class LLMService(ABC):
             batch_title = f"\nΤίτλος: # Ενότητα {module.get('number', '')}: {module.get('title', '')} (Συνέχεια)\n"
 
         final_reminder = build_final_reminder(cfg, mcq_instruction)
-        page_block = build_page_budget_block(page_target, cfg, per_batch if cfg.self_assessment else 0)
+        # The last batch also makes room for the module summary written afterwards.
+        reserved_pages = 0.0
+        if batch_number >= total_batches:
+            module_pages = total_pages or page_target * total_batches
+            reserved_pages = summary_word_target(module_pages) / words_per_page()
+        page_block = build_page_budget_block(
+            page_target, cfg, per_batch if cfg.self_assessment else 0, reserved_pages
+        )
         manifest = build_structure_manifest(cfg)
 
         # In-text citation density directive (experimental body) — gated by config
@@ -786,14 +815,19 @@ class LLMService(ABC):
         return text
 
     async def generate_summary(
-        self, module_title: str, full_content: str, user_id: str = "anonymous"
+        self,
+        module_title: str,
+        full_content: str,
+        user_id: str = "anonymous",
+        total_pages: Optional[int] = None,
     ) -> str:
+        words = summary_word_target(total_pages)
         if len(full_content) > 50000:
             content_for_summary = full_content[:40000] + "\n\n[...]\n\n" + full_content[-10000:]
         else:
             content_for_summary = full_content
 
-        prompt = f"""Γράψε μια ολοκληρωμένη Περίληψη (500-800 λέξεις) για την εκπαιδευτική ενότητα "{module_title}".
+        prompt = f"""Γράψε μια ολοκληρωμένη Περίληψη (περίπου {words} λέξεις, ΟΧΙ περισσότερες από {round(words * 1.2)}) για την εκπαιδευτική ενότητα "{module_title}".
 
 Η Περίληψη ΠΡΕΠΕΙ να:
 - Συνοψίζει τα βασικά θέματα που αναπτύχθηκαν

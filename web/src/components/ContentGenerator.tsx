@@ -231,6 +231,7 @@ export function ContentGenerator() {
         currentTaskId || '',
         null,
         structureConfig,
+        totalModulePages,
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -383,7 +384,7 @@ export function ContentGenerator() {
       let summaryText = '';
       setIsGeneratingSummary(true);
       try {
-        summaryText = await generateSummary(module.title, fullContent, modelProvider, currentTaskId || '');
+        summaryText = await generateSummary(module.title, fullContent, modelProvider, currentTaskId || '', totalModulePages);
         setModuleSummary(selectedModule, summaryText);
       } catch (error) {
         console.error('Summary generation error:', error);
@@ -409,7 +410,7 @@ export function ContentGenerator() {
         });
       }
     },
-    [selectedModule, module, moduleBatches, documentTitle, currentReview, updateBatchStatus, setProductionComplete, setModuleSummary, setIsGeneratingSummary, modelProvider, currentTaskId]
+    [selectedModule, module, moduleBatches, documentTitle, currentReview, updateBatchStatus, setProductionComplete, setModuleSummary, setIsGeneratingSummary, modelProvider, currentTaskId, totalModulePages]
   );
 
   const runRevision = useCallback(async (batchNumber: number, feedback: string) => {
@@ -461,6 +462,7 @@ export function ContentGenerator() {
         currentTaskId || '',
         null,
         structureConfig,
+        totalModulePages,
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -471,7 +473,7 @@ export function ContentGenerator() {
       setIsGenerating(false);
       clearQueueStatus();
     }
-  }, [module, moduleBatches, contentMode, approvedReferences, getApprovedContent, setIsGenerating, updateBatchContent, targetPages, learningOutcomes, keywords, totalBatches, setQueueStatus, clearQueueStatus, modelProvider, currentTaskId, structureConfig]);
+  }, [module, moduleBatches, contentMode, approvedReferences, getApprovedContent, setIsGenerating, updateBatchContent, targetPages, totalModulePages, learningOutcomes, keywords, totalBatches, setQueueStatus, clearQueueStatus, modelProvider, currentTaskId, structureConfig]);
 
   const handleFeedbackSubmit = useCallback((feedback: string) => {
     if (feedbackDialogBatch) runRevision(feedbackDialogBatch, feedback);

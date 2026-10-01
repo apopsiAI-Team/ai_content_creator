@@ -61,11 +61,18 @@ export interface BibliographyEntryCheck {
   matched_title: string | null;
   source: string | null;
   cited: boolean;
+  /** Sentences of the batch that cite this entry. */
+  contexts?: string[];
+  /** Does the source support the sentences citing it? (small-model judgement) */
+  relevance?: 'supports' | 'general' | 'unrelated' | 'uncertain';
+  relevance_reason?: string;
 }
 
 export interface BibliographyCheck {
   entries: BibliographyEntryCheck[];
   orphan_citations: string[];
+  /** Bibliography entries never cited in the text (only when the text uses citations). */
+  uncited_entries?: string[];
   summary: { total: number; verified: number };
 }
 

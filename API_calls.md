@@ -431,6 +431,12 @@ entry text (cleared at 2000 entries). Per entry, sequentially until a match:
 User-Agent carries `settings.crossref_mailto` (polite pool). No retries: any network error
 yields `unverified`, never an exception.
 
+When the text has in-text citations, the same request then makes **one Anthropic call**
+(`citation_relevance.py`, model `settings.relevance_model_id` = Haiku 4.5, `max_tokens=4000`)
+under `rate_limiter.throttle(user, Priority.LIGHT, estimated_output=1500)`, with usage
+recorded afterwards. It uses the SDK's default retries only; any API or parse error leaves
+`relevance` unset and the response is returned normally.
+
 ### 7.2 Rust side — `research_hub_mcp/` (where the parallelism lives)
 
 The Rust MCP server is the component that genuinely fans out and rate-limits:

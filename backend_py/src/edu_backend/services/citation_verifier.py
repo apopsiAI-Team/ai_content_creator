@@ -29,6 +29,7 @@ import httpx
 
 from ..config import settings
 from .research_service import THESIS_KEYWORDS
+from .citation_relevance import assess_relevance
 
 TITLE_MATCH_THRESHOLD = 0.85
 HTTP_TIMEOUT_SECONDS = 8.0
@@ -193,6 +194,31 @@ def extract_in_text_citations(body: str) -> list[tuple[frozenset[str], int, str]
 # Matching
 # =============================================================================
 
+# Sentence end, a blank line (paragraph break) or a heading line — a single
+# line break can fall mid-sentence.
+_SENTENCE_START = re.compile(r"(?:[.!?;]\s|\n\s*\n|^#{1,6}[^\n]*\n)", re.MULTILINE)
+_CONTEXT_MAX_CHARS = 400
+
+
+def extract_citation_contexts(body: str) -> list[tuple[frozenset[str], int, str]]:
+    """Like ``extract_in_text_citations`` but returns the sentence each
+    citation supports: (first-author aliases, year, sentence)."""
+    found = []
+    for match in _PARENTHETICAL.finditer(body):
+        starts = [m.end() for m in _SENTENCE_START.finditer(body, 0, match.start())]
+        start = max(starts[-1] if starts else 0, match.start() - _CONTEXT_MAX_CHARS)
+        sentence = body[start:match.end()].strip()
+        for part in match.group(1).split(";"):
+            cite = _CITATION_PART.match(part)
+            if not cite:
+                continue
+            first = re.split(r"\s+&\s+|\s+και\s+|\s+et al\.?|,", cite.group(1), maxsplit=1)[0]
+            aliases = _name_aliases(first)
+            if aliases:
+                found.append((aliases, int(cite.group(2)), sentence))
+    return found
+
+
 def _title_similarity(a: str, b: str) -> float:
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
@@ -225,6 +251,24 @@ class _Candidate:
     doi: Optional[str]
     container: str
     source: str
+    # Plain-text abstract when the index has one — used by the relevance check.
+    abstract: str = ""
+
+
+_ABSTRACT_MAX_CHARS = 1500
+
+
+def _strip_markup(text: str) -> str:
+    """CrossRef abstracts are JATS XML ("<jats:p>…</jats:p>")."""
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text or "")).strip()
+
+
+def _openalex_abstract(inverted: Optional[dict]) -> str:
+    """OpenAlex ships abstracts as {word: [positions]}; rebuild the text."""
+    if not inverted:
+        return ""
+    positions = [(pos, word) for word, poss in inverted.items() for pos in poss]
+    return " ".join(word for _, word in sorted(positions))
 
 
 def _crossref_candidate(item: dict) -> _Candidate:
@@ -244,6 +288,7 @@ def _crossref_candidate(item: dict) -> _Candidate:
         doi=item.get("DOI"),
         container=container[0] if isinstance(container, list) and container else str(container),
         source="crossref",
+        abstract=_strip_markup(item.get("abstract", ""))[:_ABSTRACT_MAX_CHARS],
     )
 
 
@@ -261,6 +306,7 @@ def _openalex_candidate(item: dict) -> _Candidate:
         doi=doi,
         container=venue,
         source="openalex",
+        abstract=_openalex_abstract(item.get("abstract_inverted_index"))[:_ABSTRACT_MAX_CHARS],
     )
 
 
@@ -300,7 +346,7 @@ async def _crossref_search(client: httpx.AsyncClient, entry: BibEntry) -> list[_
         params={
             "query.bibliographic": query[:400],
             "rows": 3,
-            "select": "DOI,title,author,editor,issued,container-title,type",
+            "select": "DOI,title,author,editor,issued,container-title,type,abstract",
         },
         headers=_headers(),
     )
@@ -374,6 +420,8 @@ def _result(entry: BibEntry, status: str, verified: bool, cand: Optional[_Candid
         "suggested_doi": suggested_doi,
         "matched_title": cand.title if cand else None,
         "source": cand.source if cand else None,
+        # Internal: consumed by the relevance check, stripped from the response.
+        "abstract": cand.abstract if cand else "",
     }
 
 
@@ -463,7 +511,7 @@ def _apply_doi_fixes(content: str, results: list[dict]) -> str:
     return content
 
 
-async def verify_bibliography(content: str) -> dict:
+async def verify_bibliography(content: str, user_id: str = "anonymous") -> dict:
     body, _ = _split_sections(content)
     entries = parse_bibliography(content)
 
@@ -490,10 +538,28 @@ async def verify_bibliography(content: str) -> dict:
             for aliases, year, _ in citations
         )
 
+    # Entries never cited in the body are padding — but only when the text
+    # uses in-text citations at all (in "no citations" mode none are cited).
+    uncited = [r["text"] for r in results if not r["cited"]] if citations else []
+
+    # Does each cited source actually support the sentences that cite it?
+    if citations:
+        contexts = extract_citation_contexts(body)
+        for entry, res in zip(entries, results):
+            res["contexts"] = list(dict.fromkeys(
+                sentence for aliases, year, sentence in contexts
+                if year == entry.year and _names_match(aliases, entry.aliases)
+            ))[:3]
+        await assess_relevance(results, user_id)
+
+    for res in results:
+        res.pop("abstract", None)
+
     corrected = _apply_doi_fixes(content, results)
     return {
         "entries": results,
         "orphan_citations": orphans,
+        "uncited_entries": uncited,
         "summary": {
             "total": len(results),
             "verified": sum(1 for r in results if r["verified"]),

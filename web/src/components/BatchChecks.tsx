@@ -21,9 +21,14 @@ const STATUS_LABELS: Record<BibliographyEntryCheck['status'], string> = {
   thesis: 'Πτυχιακή/μεταπτυχιακή εργασία',
 };
 
-/** Entries the user should look at: the work was not found, or it is a forbidden type. */
+/** Entries whose existence is in doubt: the work was not found, or it is a forbidden type. */
 function needsAttention(entry: BibliographyEntryCheck): boolean {
   return !entry.verified || entry.status === 'thesis';
+}
+
+/** Real sources cited for sentences they do not support. */
+function isUnrelated(entry: BibliographyEntryCheck): boolean {
+  return entry.relevance === 'unrelated' && !needsAttention(entry);
 }
 
 function removeElementsInstruction(keys: string[]): string {
@@ -34,7 +39,12 @@ function removeElementsInstruction(keys: string[]): string {
   );
 }
 
-function replaceReferencesInstruction(entries: BibliographyEntryCheck[], orphans: string[]): string {
+function fixBibliographyInstruction(
+  entries: BibliographyEntryCheck[],
+  unrelated: BibliographyEntryCheck[],
+  uncited: string[],
+  orphans: string[],
+): string {
   const parts: string[] = [];
   if (entries.length > 0) {
     parts.push(
@@ -43,6 +53,25 @@ function replaceReferencesInstruction(entries: BibliographyEntryCheck[], orphans
         '\nΑντικατάστησέ τες με πραγματικές, καθιερωμένες πηγές που γνωρίζεις με βεβαιότητα ' +
         '(θεμελιώδη έργα, εγχειρίδια, εκθέσεις διεθνών οργανισμών) ή αφαίρεσέ τες, ' +
         'ενημερώνοντας ΚΑΙ τις αντίστοιχες ενδοκειμενικές αναφορές. DOI μόνο αν είσαι απολύτως βέβαιος.',
+    );
+  }
+  if (unrelated.length > 0) {
+    parts.push(
+      'Οι παρακάτω πηγές είναι πραγματικές, αλλά ΔΕΝ τεκμηριώνουν τις προτάσεις που τις επικαλούνται:\n' +
+        unrelated
+          .map((e) => `- ${e.text}\n  Προτάσεις: ${(e.contexts ?? []).map((c) => `«${c}»`).join(' ')}`)
+          .join('\n') +
+        '\nΣε κάθε τέτοια πρόταση, αντικατάστησε την παραπομπή με πηγή που πραγματεύεται ΑΜΕΣΑ τον ισχυρισμό ' +
+        '(μόνο αν τη γνωρίζεις με βεβαιότητα) ή αφαίρεσε την παραπομπή. Αν η πηγή δεν χρησιμοποιείται πλέον ' +
+        'πουθενά, αφαίρεσέ την και από τη Βιβλιογραφία.',
+    );
+  }
+  if (uncited.length > 0) {
+    parts.push(
+      'Οι παρακάτω εγγραφές της Βιβλιογραφίας ΔΕΝ αναφέρονται πουθενά στο κείμενο:\n' +
+        uncited.map((t) => `- ${t}`).join('\n') +
+        '\nΓια καθεμία: πρόσθεσε ενδοκειμενική παραπομπή σε σημείο που πράγματι τεκμηριώνει, ' +
+        'ή αφαίρεσέ την από τη Βιβλιογραφία.',
     );
   }
   if (orphans.length > 0) {
@@ -71,6 +100,8 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
   const [expanded, setExpanded] = useState(false);
   const check = batch.bibliographyCheck;
   const flagged = check ? check.entries.filter(needsAttention) : [];
+  const unrelated = check ? check.entries.filter(isUnrelated) : [];
+  const uncited = check?.uncited_entries ?? [];
   const orphans = check?.orphan_citations ?? [];
   const corrected = check ? check.entries.filter((e) => e.status === 'doi_corrected' || e.status === 'doi_invalid') : [];
   const warnings = batch.structureWarnings ?? [];
@@ -78,7 +109,7 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
 
   if (!check && warnings.length === 0 && !overLimit) return null;
 
-  const hasIssues = flagged.length > 0 || orphans.length > 0;
+  const hasIssues = flagged.length > 0 || unrelated.length > 0 || uncited.length > 0 || orphans.length > 0;
 
   return (
     <div className={styles.checks}>
@@ -117,6 +148,8 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
             <BookCheck size={14} />
             <span>
               Βιβλιογραφία: {check.summary.verified}/{check.summary.total} επαληθευμένες
+              {unrelated.length > 0 && ` · ${unrelated.length} δεν τεκμηριώνουν το κείμενο`}
+              {uncited.length > 0 && ` · ${uncited.length} χωρίς παραπομπή στο κείμενο`}
               {orphans.length > 0 && ` · ${orphans.length} αναφορές χωρίς εγγραφή`}
             </span>
             {(hasIssues || corrected.length > 0) && (expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
@@ -128,6 +161,24 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
                 <div key={entry.text} className={styles.entry}>
                   <span className={styles.entryStatus}>{STATUS_LABELS[entry.status]}</span>
                   <span className={styles.entryText}>{entry.text}</span>
+                </div>
+              ))}
+              {unrelated.map((entry) => (
+                <div key={`rel-${entry.text}`} className={styles.entry}>
+                  <span className={styles.entryStatus}>Δεν τεκμηριώνει το κείμενο</span>
+                  <span className={styles.entryText}>{entry.text}</span>
+                  {entry.relevance_reason && (
+                    <span className={styles.entryReason}>{entry.relevance_reason}</span>
+                  )}
+                  {(entry.contexts ?? []).map((sentence) => (
+                    <span key={sentence} className={styles.entryContext}>«{sentence}»</span>
+                  ))}
+                </div>
+              ))}
+              {uncited.map((text) => (
+                <div key={`unc-${text}`} className={styles.entry}>
+                  <span className={styles.entryStatus}>Χωρίς παραπομπή στο κείμενο</span>
+                  <span className={styles.entryText}>{text}</span>
                 </div>
               ))}
               {corrected.filter((e) => !needsAttention(e)).map((entry) => (
@@ -146,10 +197,10 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
                 <button
                   className={styles.fixButton}
                   disabled={disabled}
-                  onClick={() => onFix(replaceReferencesInstruction(flagged, orphans))}
+                  onClick={() => onFix(fixBibliographyInstruction(flagged, unrelated, uncited, orphans))}
                 >
                   <Wand2 size={12} />
-                  Αντικατάσταση μη επαληθευμένων
+                  Διόρθωση βιβλιογραφίας
                 </button>
               )}
             </div>

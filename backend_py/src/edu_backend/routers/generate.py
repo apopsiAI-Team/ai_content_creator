@@ -89,6 +89,7 @@ class GenerateRequest(BaseModel):
     previous_content: str = ""  # Approved content from previous batches (anti-overlap)
     batch_number: int = 1  # Current batch number
     total_batches: int = 1  # Estimated total batches for the module
+    total_pages: Optional[int] = None  # Requested pages for the whole module (sizes the summary)
     model_provider: Literal["claude", "openai"] = "claude"
     # Revision mode — apply targeted edits to current_draft instead of generating from scratch.
     mode: Literal["generate", "revision"] = "generate"
@@ -251,6 +252,7 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
                 previous_content=request.previous_content,
                 batch_number=request.batch_number,
                 total_batches=request.total_batches,
+                total_pages=request.total_pages,
                 user_id=user_id,
                 mode=request.mode,
                 current_draft=request.current_draft,
@@ -289,6 +291,7 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
 class SummaryRequest(BaseModel):
     module_title: str
     full_content: str  # All approved batches concatenated
+    total_pages: Optional[int] = None  # Requested pages for the module — the summary scales with it
     model_provider: Literal["claude", "openai"] = "claude"
     document_id: str = ""  # Optional correlation id — stable per uploaded doc/draft session
 
@@ -312,6 +315,7 @@ async def generate_summary(request: SummaryRequest, raw_request: Request):
             module_title=request.module_title,
             full_content=request.full_content,
             user_id=user_id,
+            total_pages=request.total_pages,
         )
 
         return {"summary": summary_text}
@@ -340,7 +344,7 @@ async def verify_bibliography_endpoint(request: VerifyBibliographyRequest, raw_r
                     "content": request.content, "changed": False}
 
         user_id = _extract_user_id(raw_request)
-        result = await verify_bibliography(request.content)
+        result = await verify_bibliography(request.content, user_id)
         _log_request(
             "/api/verify-bibliography",
             user_id,

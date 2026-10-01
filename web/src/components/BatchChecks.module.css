@@ -93,6 +93,18 @@
   word-break: break-word;
 }
 
+.entryReason {
+  color: #92400E;
+  font-style: italic;
+}
+
+.entryContext {
+  color: var(--neutral-600);
+  padding-left: var(--space-sm);
+  border-left: 2px solid rgba(245, 158, 11, 0.4);
+  word-break: break-word;
+}
+
 .fixButton {
   display: inline-flex;
   align-items: center;

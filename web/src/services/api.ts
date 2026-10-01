@@ -268,6 +268,7 @@ export async function generateEducationalContentStream(
   occupation: Occupation | null = null,
   structureConfig?: StructureConfig,
   onStructureWarnings?: (keys: string[]) => void,
+  totalPages?: number,
 ): Promise<void> {
   const response = await fetch(apiUrl('/api/generate-stream'), {
     method: 'POST',
@@ -292,6 +293,7 @@ export async function generateEducationalContentStream(
       document_id: documentId,
       occupation,
       ...(structureConfig ? { structure_config: structureConfig } : {}),
+      total_pages: totalPages || null,
     }),
   });
 
@@ -380,6 +382,7 @@ export async function generateSummary(
   fullContent: string,
   modelProvider: 'claude' | 'openai' = 'claude',
   documentId = '',
+  totalPages?: number,
 ): Promise<string> {
   const response = await fetch(apiUrl('/api/generate-summary'), {
     method: 'POST',
@@ -387,6 +390,7 @@ export async function generateSummary(
     body: JSON.stringify({
       module_title: moduleTitle,
       full_content: fullContent,
+      total_pages: totalPages || null,
       model_provider: modelProvider,
       document_id: documentId,
     }),
