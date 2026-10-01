@@ -849,3 +849,9 @@
     gap: var(--space-sm);
   }
 }
+
+.instructionHint {
+  margin: var(--space-xs) 0 0;
+  font-size: 0.75rem;
+  color: var(--graphite);
+}

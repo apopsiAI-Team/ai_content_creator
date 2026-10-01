@@ -64,6 +64,7 @@ export function ContentGenerator() {
     selectedModule,
     contentMode,
     userInstructions,
+    setUserInstructions,
     totalModulePages,
     targetPages,
     learningOutcomes,
@@ -104,8 +105,9 @@ export function ContentGenerator() {
   const isEscoMode = workflowMode === 'esco';
 
   const [streamingContent, setStreamingContent] = useState('');
-  const [showInstructionInput, setShowInstructionInput] = useState(false);
-  const [localInstructions, setLocalInstructions] = useState('');
+  // Instructions are kept in the store and apply to every following batch
+  // until the user edits or clears them.
+  const [showInstructionInput, setShowInstructionInput] = useState(Boolean(userInstructions.trim()));
   const [extendPages, setExtendPages] = useState(20);
   const [reviewProgress, setReviewProgress] = useState('');
   const [showReview, setShowReview] = useState(false);
@@ -166,7 +168,7 @@ export function ContentGenerator() {
     setStreamingContent('');
 
     const batchNumber = moduleBatches.length + 1;
-    const instructions = localInstructions || userInstructions;
+    const instructions = userInstructions;
     const previousContent = getApprovedContent();
 
     // Edit-doc "Επέκταση": the user asks for N more pages on top of the
@@ -215,8 +217,6 @@ export function ContentGenerator() {
             bibliographyCheck: result.bibliographyCheck,
           });
           setStreamingContent('');
-          setShowInstructionInput(false);
-          setLocalInstructions('');
         },
         effectiveTarget,
         learningOutcomes,
@@ -246,7 +246,6 @@ export function ContentGenerator() {
     module,
     moduleBatches,
     contentMode,
-    localInstructions,
     userInstructions,
     approvedReferences,
     addGeneratedBatch,
@@ -802,7 +801,9 @@ export function ContentGenerator() {
                     <Edit3 size={18} />
                     {showInstructionInput
                       ? 'Απόκρυψη οδηγιών'
-                      : 'Προσθήκη οδηγιών'}
+                      : userInstructions.trim()
+                        ? 'Οδηγίες (ενεργές)'
+                        : 'Προσθήκη οδηγιών'}
                   </button>
 
                   {showInstructionInput && (
@@ -812,12 +813,15 @@ export function ContentGenerator() {
                       exit={{ opacity: 0, height: 0 }}
                     >
                       <textarea
-                        value={localInstructions}
-                        onChange={(e) => setLocalInstructions(e.target.value)}
+                        value={userInstructions}
+                        onChange={(e) => setUserInstructions(e.target.value)}
                         placeholder="Π.χ. Εστίασε περισσότερο στα πρακτικά παραδείγματα..."
                         className={styles.instructionInput}
                         rows={4}
                       />
+                      <p className={styles.instructionHint}>
+                        Οι οδηγίες ισχύουν για όλα τα επόμενα τμήματα, μέχρι να τις αλλάξετε ή να τις σβήσετε.
+                      </p>
                     </motion.div>
                   )}
                 </div>

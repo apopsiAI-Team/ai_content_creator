@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Clock, BookOpen, ChevronRight, Settings } from 'lucide-react';
 import { useStore } from '../store/useStore';
@@ -17,11 +16,8 @@ export function ModuleList() {
     setTotalModulePages,
     targetPages,
     setTargetPages,
-    setUserInstructions,
   } = useStore();
 
-  const [withInstructions, setWithInstructions] = useState(false);
-  const [instructions, setInstructions] = useState('');
 
   const handleModuleSelect = (moduleNumber: number) => {
     setSelectedModule(moduleNumber);
@@ -29,9 +25,6 @@ export function ModuleList() {
 
   const handleStartGeneration = () => {
     if (selectedModule) {
-      if (withInstructions && instructions.trim()) {
-        setUserInstructions(instructions.trim());
-      }
       setCurrentStep('generate');
     }
   };
@@ -131,33 +124,6 @@ export function ModuleList() {
               <Settings size={20} />
               Ρυθμίσεις Δημιουργίας
             </h2>
-
-            <div className={styles.settingGroup}>
-              <label className={styles.settingLabel}>
-                Λειτουργία Δημιουργίας
-              </label>
-              <p className={styles.experimentalHint}>
-                Βιβλιογραφία από τη γνώση του μοντέλου, με αυτόματο έλεγχο κάθε εγγραφής σε CrossRef/OpenAlex
-              </p>
-              <label className={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={withInstructions}
-                  onChange={(e) => setWithInstructions(e.target.checked)}
-                  className={styles.checkbox}
-                />
-                Προσθήκη οδηγιών
-              </label>
-              {withInstructions && (
-                <textarea
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="π.χ. Εστίασε στα πρακτικά παραδείγματα, χρησιμοποίησε ελληνικές πηγές..."
-                  className={styles.instructionsArea}
-                  rows={3}
-                />
-              )}
-            </div>
 
             <div className={styles.settingGroup}>
               <label className={styles.settingLabel}>

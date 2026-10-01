@@ -74,7 +74,7 @@ Only `experimental` is exposed in the UI (the "Κανονική"/`standard` Rese
 - **Bibliography verification** — after every batch the frontend calls `POST /api/verify-bibliography` (`services/citation_verifier.py`): each entry is checked against CrossRef → OpenAlex → Open Library (books), or its cited URL must resolve (reports). Wrong DOIs are corrected (same year ±1 only) or removed in the content; unverified entries, placeholders, theses and in-text citations without an entry are flagged on the batch card, with a one-click revision to replace them.
 - **Citation support** — existence is not enough, so the same endpoint also flags (a) bibliography entries never cited in the text (`uncited_entries`; only when the text uses in-text citations) and (b) real sources that do not support the sentences citing them: `services/citation_relevance.py` sends each cited entry's title + abstract (from CrossRef/OpenAlex) and its citing sentences to a small model (`settings.relevance_model_id`, Haiku 4.5) in one call per batch → `relevance` ∈ `supports | general | unrelated | uncertain`. Only `unrelated` is surfaced. It catches gross topic mismatches, not wrong page-level details (no full texts).
 
-`userInstructions` is an independent free-text steer.
+`userInstructions` is an independent free-text steer, entered on the generation screen ("Προσθήκη οδηγιών" in `ContentGenerator`, stored in `useStore`); it applies to every following batch until the user edits or clears it. The Landing Page and ESCO module list no longer have their own instructions box.
 
 ### Structure (`structureConfig`)
 

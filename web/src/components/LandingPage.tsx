@@ -28,7 +28,6 @@ export function LandingPage() {
     setDocumentFile,
     setDocumentData,
     setStandardModule,
-    setUserInstructions,
     setError,
     modelProvider,
     setModelProvider,
@@ -69,8 +68,6 @@ export function LandingPage() {
   const [hours, setHours] = useState<number>(10);
   const [modulePages, setModulePages] = useState<number>(55);
   const [pagesPerBatch, setPagesPerBatch] = useState<number>(20);
-  const [withInstructions, setWithInstructions] = useState(false);
-  const [instructions, setInstructions] = useState('');
 
   // ESCO upload state
   const [isDragging, setIsDragging] = useState(false);
@@ -83,10 +80,7 @@ export function LandingPage() {
     const trimmed = topic.trim();
     if (!trimmed) return;
     setStandardModule(trimmed, hours, modulePages, pagesPerBatch, '', '', 'experimental');
-    if (withInstructions && instructions.trim()) {
-      setUserInstructions(instructions.trim());
-    }
-  }, [topic, hours, modulePages, pagesPerBatch, withInstructions, instructions, setStandardModule, setUserInstructions]);
+  }, [topic, hours, modulePages, pagesPerBatch, setStandardModule]);
 
   // ESCO file handling
   const handleFile = useCallback(async (file: File) => {
@@ -483,32 +477,6 @@ export function LandingPage() {
                   </div>
                 </div>
               )}
-
-              {/* Generation settings */}
-              <div className={styles.modeSection}>
-                <label className={styles.modeSectionLabel}>Λειτουργία Δημιουργίας</label>
-                <p className={styles.experimentalHint}>
-                  Βιβλιογραφία από τη γνώση του μοντέλου, με αυτόματο έλεγχο κάθε εγγραφής σε CrossRef/OpenAlex
-                </p>
-                <label className={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={withInstructions}
-                    onChange={(e) => setWithInstructions(e.target.checked)}
-                    className={styles.checkbox}
-                  />
-                  Προσθήκη οδηγιών
-                </label>
-                {withInstructions && (
-                  <textarea
-                    value={instructions}
-                    onChange={(e) => setInstructions(e.target.value)}
-                    placeholder="π.χ. Εστίασε στα πρακτικά παραδείγματα, χρησιμοποίησε ελληνικές πηγές..."
-                    className={styles.instructionsArea}
-                    rows={3}
-                  />
-                )}
-              </div>
 
               {/* Start Button */}
               <button
