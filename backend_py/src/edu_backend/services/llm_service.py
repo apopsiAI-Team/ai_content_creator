@@ -524,8 +524,12 @@ class LLMService(ABC):
         occupation: Optional[dict] = None,
         structure_config: Optional[StructureConfig] = None,
         total_pages: Optional[int] = None,
+        greek_sources_block: str = "",
     ) -> AsyncGenerator[str, None]:
         """Stream content generation with auto-continuation if truncated.
+
+        ``greek_sources_block`` (integration mode) hands verified Greek sources
+        to the model as optional, additional references.
 
         When ``mode == "revision"`` the existing ``current_draft`` is sent
         back to the model as an assistant turn followed by a targeted
@@ -644,7 +648,7 @@ class LLMService(ABC):
 ## ΕΝΟΤΗΤΑ
 {module_context}
 {instructions_block}{continuation_block}
-Χρησιμοποίησε ΠΡΑΓΜΑΤΙΚΕΣ ακαδημαϊκές πηγές από τη γνώση σου.
+Χρησιμοποίησε ΠΡΑΓΜΑΤΙΚΕΣ ακαδημαϊκές πηγές από τη γνώση σου.{greek_sources_block}
 {citation_directive}
 {page_block}{final_reminder}{manifest}"""
         else:
@@ -656,7 +660,7 @@ class LLMService(ABC):
 {module_context}
 
 ## ΔΙΑΘΕΣΙΜΕΣ ΑΝΑΦΟΡΕΣ (ΧΡΗΣΙΜΟΠΟΙΗΣΕ ΜΟΝΟ ΑΥΤΕΣ)
-{formatted_refs}
+{formatted_refs}{greek_sources_block}
 {instructions_block}{continuation_block}
 Δημιούργησε πλήρες εκπαιδευτικό υλικό σύμφωνα με τον παρακάτω προϋπολογισμό σελίδων.
 {page_block}{final_reminder}{manifest}"""

@@ -938,10 +938,12 @@ function mergeGlossaryEntries(glossaryBlocks: string[]): string {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Try to parse "**Term**: definition" or "Term: definition" or "- Term: definition"
-      const match = trimmed.match(/^[-*]*\s*\*?\*?([^:*]+)\*?\*?\s*[:\-–]\s*(.+)/);
+      // "**Term:** definition" (the model's usual form), "**Term**: definition",
+      // "Term: definition", optionally as a list item ("- ...").
+      const item = trimmed.replace(/^(?:[-•]|\*(?!\*))\s+/, '');
+      const match = item.match(/^\*\*(.+?)\*\*\s*(?::|[-–—]\s)?\s*(.+)$/) ?? item.match(/^([^:*]+?)\s*(?::|\s[-–—]\s)\s*(.+)$/);
       if (match) {
-        const term = match[1].trim();
+        const term = match[1].replace(/\s*:\s*$/, '').trim();
         const definition = match[2].trim();
         // Keep first occurrence (or could merge)
         if (!entries.has(term.toLowerCase())) {

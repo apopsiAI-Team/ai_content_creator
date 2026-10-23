@@ -14,6 +14,14 @@ from ..prompts.structure import StructureConfig, detect_structure_violations, re
 from ..services.llm_service import get_llm_service
 from ..services.research_service import get_research_service
 from ..services.citation_verifier import verify_bibliography
+from ..services.greek_sources import (
+    apply_greek_sources,
+    build_integration_block,
+    citation_label,
+    format_apa,
+    prepare_integration_sources,
+    suggest_greek_sources,
+)
 from ..services.esco_service import get_esco_service
 from ..rate_limiter import get_rate_limiter, Priority
 from ..auth import require_jwt
@@ -97,6 +105,9 @@ class GenerateRequest(BaseModel):
     document_id: str = ""  # Optional correlation id — stable per uploaded doc/draft session, surfaces in backend logs
     occupation: Optional[Occupation] = None  # Optional ESCO occupation context (program-level)
     structure_config: StructureConfigModel = Field(default_factory=StructureConfigModel)  # Which optional structural elements to include
+    # Greek sources: "suggest" = proposed after the batch (user picks); "integrate" =
+    # verified Greek sources are also given to the model before it writes.
+    greek_sources_mode: Literal["suggest", "integrate"] = "suggest"
 
 
 class ReviewRequest(BaseModel):
@@ -184,6 +195,15 @@ async def generate_content(request: GenerateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _integration_context(module: dict, learning_outcomes: str, keywords: str) -> str:
+    """What the batch will cover — the basis for the Greek-sources search."""
+    parts = [(module.get("content") or "")[:1500], learning_outcomes, keywords]
+    skills = [s.get("name", "") for s in module.get("skills") or []][:15]
+    if skills:
+        parts.append("Δεξιότητες: " + ", ".join(skills))
+    return "\n".join(p.strip() for p in parts if p and p.strip())
+
+
 @router.post("/generate-stream")
 async def generate_content_stream(request: GenerateRequest, raw_request: Request):
     """Stream content generation (single pass for real-time feedback)"""
@@ -240,6 +260,25 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
 
             # Stream content (rate limiting happens inside generate_content_stream)
             structure_cfg = StructureConfig(**request.structure_config.model_dump())
+
+            # Integration mode: find verified Greek sources BEFORE writing.
+            greek_block = ""
+            if request.greek_sources_mode == "integrate" and not is_revision:
+                greek_sources = await prepare_integration_sources(
+                    module_dict.get("title", ""),
+                    _integration_context(module_dict, request.learning_outcomes, request.keywords),
+                    request.previous_content,
+                    user_id,
+                )
+                greek_block = build_integration_block(greek_sources, structure_cfg.in_text_citations)
+                _log_request("/api/generate-stream", user_id, request.document_id,
+                             greek_sources_given=len(greek_sources))
+                given = [
+                    {"key": (c.doi or c.title)[:200], "kind": c.kind, "title": c.title, "doi": c.doi,
+                     "apa": format_apa(c), "citation": citation_label(c)}
+                    for c in greek_sources
+                ]
+                yield f"data: {json.dumps({'type': 'greek_sources', 'count': len(given), 'data': given})}\n\n"
             generated: list[str] = []
             async for chunk in llm.generate_content_stream(
                 module_dict,
@@ -258,6 +297,7 @@ async def generate_content_stream(request: GenerateRequest, raw_request: Request
                 current_draft=request.current_draft,
                 occupation=occupation_dict,
                 structure_config=structure_cfg,
+                greek_sources_block=greek_block,
             ):
                 generated.append(chunk)
                 yield f"data: {json.dumps({'type': 'content', 'text': chunk})}\n\n"
@@ -357,6 +397,63 @@ async def verify_bibliography_endpoint(request: VerifyBibliographyRequest, raw_r
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class GreekSourcesRequest(BaseModel):
+    content: str  # One generated batch (markdown), including its Βιβλιογραφία
+    topic: str = ""  # Module title — first search query
+    document_id: str = ""
+
+
+@router.post("/greek-sources/suggest")
+async def greek_sources_suggest(request: GreekSourcesRequest, raw_request: Request):
+    """Search Greek open repositories (Κάλλιπος, ΕΚΤ) for sources that directly
+    support the batch. Only suggestions — the user picks what to add."""
+    try:
+        if not request.content.strip():
+            return {"suggestions": [], "searched": 0, "queries": []}
+        user_id = _extract_user_id(raw_request)
+        result = await suggest_greek_sources(request.content, request.topic, user_id)
+        _log_request(
+            "/api/greek-sources/suggest",
+            user_id,
+            request.document_id,
+            searched=result["searched"],
+            suggested=len(result["suggestions"]),
+        )
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class GreekSourceSelection(BaseModel):
+    key: str = ""
+    apa: str
+    citation: str = ""
+    sentence: Optional[str] = None
+    doi: Optional[str] = None
+
+
+class ApplyGreekSourcesRequest(BaseModel):
+    content: str
+    suggestions: list[GreekSourceSelection]
+    document_id: str = ""
+
+
+@router.post("/greek-sources/apply")
+async def greek_sources_apply(request: ApplyGreekSourcesRequest, raw_request: Request):
+    """Add the selected sources: an extra in-text citation at the sentence each
+    supports + a bibliography entry. Nothing existing is replaced. No LLM call."""
+    result = apply_greek_sources(request.content, [s.model_dump() for s in request.suggestions])
+    _log_request(
+        "/api/greek-sources/apply",
+        _extract_user_id(raw_request),
+        request.document_id,
+        applied=len(result["applied"]),
+        unplaced=len(result["unplaced"]),
+    )
+    return result
 
 
 class BibliographyRequest(BaseModel):

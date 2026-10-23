@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Model settings
     # `model_id` is the Anthropic (Claude) model — kept as the original setting name
     # for backwards compatibility with existing code paths.
-    model_id: str = "claude-opus-5"
+    model_id: str = "claude-opus-5-5"
     openai_model_id: str = "gpt-5.6-sol"
     # OpenAI is disabled: every request runs on Claude and the UI hides the
     # model picker. Set OPENAI_ENABLED=true (and OPENAI_API_KEY) to bring it back.
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Small, cheap model that judges whether each cited source supports the
     # sentences citing it (services/citation_relevance.py).
-    relevance_model_id: str = "claude-haiku-4-5-20251001"
+    relevance_model_id: str = "claude-haiku-5-5"
 
     # Contact address sent in the User-Agent to CrossRef/OpenAlex (polite pool)
     crossref_mailto: str = "contact@example.com"

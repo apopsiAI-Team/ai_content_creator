@@ -855,3 +855,21 @@
   font-size: 0.75rem;
   color: var(--graphite);
 }
+
+.greekModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
+}
+
+.greekModes input {
+  accent-color: var(--burnt-sienna);
+}
+
+.greekModeHint {
+  flex-basis: 100%;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  color: var(--graphite);
+  opacity: 0.8;
+}

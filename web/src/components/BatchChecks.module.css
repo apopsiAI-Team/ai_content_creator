@@ -128,3 +128,105 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Greek sources — suggestions the user may add */
+.greekBox {
+  border-radius: 6px;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--primary-50);
+  color: var(--primary-dark);
+}
+
+.suggestion {
+  display: flex;
+  gap: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--primary-100);
+  cursor: pointer;
+}
+
+.suggestion input {
+  flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.suggestionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kindBadge {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--primary-100);
+  color: var(--primary-dark);
+  font-weight: 600;
+  font-size: 0.7rem;
+}
+
+.suggestionReason {
+  color: var(--primary-dark);
+  font-style: italic;
+}
+
+.suggestionContext {
+  color: var(--neutral-600);
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--primary-100);
+  word-break: break-word;
+}
+
+.addButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin-top: var(--space-xs);
+  padding: 2px var(--space-sm);
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 6px;
+  background: var(--warm-white);
+  border: 1px solid var(--primary);
+  color: var(--primary-dark);
+  cursor: pointer;
+}
+
+.addButton:hover:not(:disabled) {
+  background: var(--primary-100);
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hint {
+  color: var(--neutral-600);
+}
+
+.suggestionCitation {
+  color: var(--neutral-700);
+}
+
+.givenSource {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--primary-100);
+}
+
+.givenUsed {
+  font-weight: 600;
+  color: var(--secondary-dark);
+}
+
+.givenUnused {
+  font-weight: 600;
+  color: var(--neutral-600);
+}

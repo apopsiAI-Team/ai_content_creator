@@ -20,7 +20,7 @@ reflects the code as of this writing; no source was modified to produce it.
 The backend supports **two LLM providers behind one shared abstraction**:
 
 - **Anthropic / Claude** — `ClaudeService`, using the `anthropic` SDK's
-  `AsyncAnthropic` client. Default model `claude-opus-5`.
+  `AsyncAnthropic` client. Default model `claude-opus-5-5`.
 - **OpenAI / GPT** — `OpenAIService`, using the `openai` SDK's `AsyncOpenAI` client.
   Default model `gpt-5.6-sol`.
 
@@ -67,7 +67,7 @@ the stack is shared.
   variant (`claude_service.py:30`). Constructed with `api_key` only. **No custom `timeout`,
   `max_retries`, `base_url`, or `default_headers`** are passed, so the SDK's own defaults
   apply beneath the application's retry layer (see §2.3).
-- **Model:** `self.model = settings.model_id` → `"claude-opus-5"` (`config.py:20`).
+- **Model:** `self.model = settings.model_id` → `"claude-opus-5-5"` (`config.py:20`).
 - **Streaming** (`claude_service.py:33-51`):
   ```python
   async with self.client.messages.stream(
@@ -422,7 +422,8 @@ generated batch, **no LLM call and no rate limiter**. One `httpx.AsyncClient` pe
 bounded by a module-level `asyncio.Semaphore(5)`; results cached in-process by normalised
 entry text (cleared at 2000 entries). Per entry, sequentially until a match:
 
-- `GET https://api.crossref.org/works/{doi}` (if the entry has a DOI)
+- `GET https://api.crossref.org/works/{doi}` (if the entry has a DOI), else
+  `GET https://api.datacite.org/dois/{doi}` (Κάλλιπος and other DataCite DOIs)
 - `GET https://api.crossref.org/works?query.bibliographic=…&rows=3`
 - `GET https://api.openalex.org/works?search=…&per-page=3`
 - `GET https://openlibrary.org/search.json?q=…` (books)
@@ -432,10 +433,39 @@ User-Agent carries `settings.crossref_mailto` (polite pool). No retries: any net
 yields `unverified`, never an exception.
 
 When the text has in-text citations, the same request then makes **one Anthropic call**
-(`citation_relevance.py`, model `settings.relevance_model_id` = Haiku 4.5, `max_tokens=4000`)
+(`citation_relevance.py`, model `settings.relevance_model_id` = Haiku 5.5, `max_tokens=4000`)
 under `rate_limiter.throttle(user, Priority.LIGHT, estimated_output=1500)`, with usage
 recorded afterwards. It uses the SDK's default retries only; any API or parse error leaves
 `relevance` unset and the response is returned normally.
+
+### 7.1c Greek sources — `greek_sources.py` (`POST /api/greek-sources/suggest`, `/apply`)
+
+Called by the frontend once per generated batch, **in parallel with** the bibliography
+verification. One `httpx.AsyncClient` per request (10s timeout); all searches run
+concurrently via `asyncio.gather` (no semaphore — at most ~12 requests):
+
+- Κάλλιπος catalogue: `GET https://api.datacite.org/dois?prefix=10.57713&page[size]=1000`
+  (paged via `links.next`), loaded once and cached **in-process for 24h** (~1,150 books),
+  then ranked locally against the queries (no per-request call). Guarded by an `asyncio.Lock`.
+- ΕΚΤ: `GET https://api.crossref.org/prefixes/10.12681/works?query.bibliographic=…&filter=type:…`
+  — journal articles for each query (topic + up to 4 headings, rows 5), plus proceedings
+  and PhD theses (`10.12681/eadd` only) for the topic.
+- OpenAlex: `GET https://api.openalex.org/works?search=…&filter=language:el,type:article,primary_location.source.type:journal`
+  for each query (rows 4).
+
+English queries additionally hit `GET https://api.openalex.org/works?filter=authorships.institutions.country_code:GR,…`
+(kept only when the first author is at a Greek institution). The queries themselves come from
+**one Haiku call** (`generate_queries`: 3 Greek + 3 English; falls back to topic + headings).
+
+Then **one more Anthropic call** (Haiku, `settings.relevance_model_id`, `max_tokens=4000`) under
+`rate_limiter.throttle(user, Priority.LIGHT, estimated_output=1500)` selects the candidates
+that directly support a quoted sentence (or the topic, when the text has no in-text
+citations). Any network/API error yields fewer or no suggestions, never an exception.
+`/apply` is pure string manipulation (no external calls).
+
+**Integration mode** (`greek_sources_mode: "integrate"` on `POST /api/generate-stream`): the
+same pipeline (2 Haiku calls + searches) runs inside the stream **before** the Opus call,
+so its latency (~10–15 s) adds to time-to-first-token; the chosen sources go into the prompt.
 
 ### 7.2 Rust side — `research_hub_mcp/` (where the parallelism lives)
 

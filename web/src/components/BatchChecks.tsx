@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { AlertTriangle, BookCheck, ChevronDown, ChevronUp, Wand2 } from 'lucide-react';
-import type { BibliographyEntryCheck, GeneratedContent } from '../store/useStore';
+import { AlertTriangle, BookCheck, ChevronDown, ChevronUp, Languages, Plus, Wand2 } from 'lucide-react';
+import type { BibliographyEntryCheck, GeneratedContent, GreekSourceGiven, GreekSourceSuggestion } from '../store/useStore';
 import { PAGE_CEILING_MARGIN } from '../utils/pages';
 import styles from './BatchChecks.module.css';
 
@@ -95,6 +95,163 @@ function fixBibliographyInstruction(
   return parts.join('\n\n');
 }
 
+const KIND_LABELS: Record<GreekSourceSuggestion['kind'], string> = {
+  kallipos: 'Σύγγραμμα Κάλλιπος',
+  journal: 'Άρθρο περιοδικού',
+  conference: 'Πρακτικά συνεδρίου',
+  doctoral: 'Διδακτορική διατριβή (ΕΚΤ)',
+};
+
+const GREEK_LETTERS = /[\u0370-\u03ff\u1f00-\u1fff]/;
+
+/** APA entries mark italics with *…* (markdown) — render them as italics. */
+function withItalics(text: string) {
+  return text.split(/(\*[^*]+\*)/g).map((part, i) =>
+    part.length > 2 && part.startsWith('*') && part.endsWith('*') ? <em key={i}>{part.slice(1, -1)}</em> : part,
+  );
+}
+
+/** Did the model use a source it was given? (its DOI or title is in the batch) */
+function isUsed(source: GreekSourceGiven, content: string): boolean {
+  const text = content.toLowerCase();
+  return (!!source.doi && text.includes(source.doi.toLowerCase())) || text.includes(source.title.toLowerCase());
+}
+
+interface GreekSourcesProps {
+  /** Undefined when the after-batch search did not run or failed. */
+  suggestions?: GreekSourceSuggestion[];
+  /** Integration mode: sources given to the model before it wrote the batch. */
+  given?: GreekSourceGiven[];
+  content: string;
+  /** Bibliography entries with Greek text (author or title). */
+  greekEntries: number;
+  totalEntries: number;
+  canAdd: boolean;
+  disabled: boolean;
+  onAdd: (selected: GreekSourceSuggestion[]) => void;
+}
+
+/** Verified Greek sources the user may add as EXTRA citations — never replacing one. */
+function GreekSources({
+  suggestions: maybeSuggestions,
+  given,
+  content,
+  greekEntries,
+  totalEntries,
+  canAdd,
+  disabled,
+  onAdd,
+}: GreekSourcesProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const suggestions = maybeSuggestions ?? [];
+  const chosen = suggestions.filter((s) => selected.has(s.key));
+  const usedCount = given ? given.filter((g) => isUsed(g, content)).length : 0;
+
+  const toggle = (key: string) => {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setSelected(next);
+  };
+
+  return (
+    <div className={styles.greekBox}>
+      <button className={styles.biblioToggle} onClick={() => setExpanded(!expanded)}>
+        <Languages size={14} />
+        <span>
+          Ελληνικές πηγές: {greekEntries}/{totalEntries} στη βιβλιογραφία
+          {given && ` · δόθηκαν στο μοντέλο ${given.length}, χρησιμοποιήθηκαν ${usedCount}`}
+          {maybeSuggestions &&
+            (suggestions.length > 0
+              ? ` · ${suggestions.length} ${suggestions.length === 1 ? 'προτεινόμενη' : 'προτεινόμενες'}`
+              : ' · καμία νέα πρόταση')}
+        </span>
+        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+
+      {expanded && (
+        <div className={styles.biblioDetails}>
+          {given && (
+            <>
+              <span className={styles.hint}>
+                {given.length > 0
+                  ? 'Επαληθευμένες ελληνικές πηγές που δόθηκαν στο μοντέλο πριν γράψει (ενσωμάτωση κατά τη συγγραφή):'
+                  : 'Ενσωμάτωση κατά τη συγγραφή: δεν βρέθηκαν ελληνικές πηγές άμεσα σχετικές με την ενότητα.'}
+              </span>
+              {given.map((g) => {
+                const used = isUsed(g, content);
+                return (
+                  <div key={g.key} className={styles.givenSource}>
+                    <span className={used ? styles.givenUsed : styles.givenUnused}>
+                      {used ? '✓ Χρησιμοποιήθηκε' : '– Δεν χρησιμοποιήθηκε'}
+                    </span>
+                    <span className={styles.entryText}>{withItalics(g.apa)}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+          {!maybeSuggestions ? null : suggestions.length === 0 ? (
+            <span className={styles.hint}>
+              Δεν βρέθηκαν στον Κάλλιπο και στο ΕΚΤ ελληνικές πηγές που να τεκμηριώνουν άμεσα αυτό το τμήμα.
+            </span>
+          ) : (
+            <span className={styles.hint}>
+              Πηγές από τον Κάλλιπο και το ΕΚΤ που τεκμηριώνουν συγκεκριμένα σημεία. Όσες επιλέξετε
+              προστίθενται ως επιπλέον παραπομπές: καμία υπάρχουσα πηγή δεν αφαιρείται.
+            </span>
+          )}
+          {suggestions.map((s) => (
+            <label key={s.key} className={styles.suggestion}>
+              {canAdd && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(s.key)}
+                  disabled={disabled}
+                  onChange={() => toggle(s.key)}
+                />
+              )}
+              <span className={styles.suggestionBody}>
+                <span className={styles.kindBadge}>{KIND_LABELS[s.kind]}</span>
+                <span className={styles.entryText}>{withItalics(s.apa)}</span>
+                {s.sentence ? (
+                  <>
+                    <span className={styles.suggestionCitation}>
+                      Παραπομπή που θα μπει: <strong>({s.citation})</strong>
+                    </span>
+                    <span className={styles.suggestionContext}>
+                      Στο τέλος της υπάρχουσας πρότασης (δεν αλλάζει): «{s.sentence}»
+                    </span>
+                  </>
+                ) : (
+                  <span className={styles.suggestionCitation}>
+                    Μόνο εγγραφή στη Βιβλιογραφία{s.section ? ` · Αφορά: ${s.section}` : ''}
+                  </span>
+                )}
+                {s.reason && <span className={styles.suggestionReason}>{s.reason}</span>}
+              </span>
+            </label>
+          ))}
+          {canAdd && suggestions.length > 0 && (
+            <button
+              className={styles.addButton}
+              disabled={disabled || chosen.length === 0}
+              onClick={() => {
+                onAdd(chosen);
+                setSelected(new Set());
+              }}
+            >
+              <Plus size={12} />
+              Προσθήκη επιλεγμένων{chosen.length > 0 ? ` (${chosen.length})` : ''}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface BatchChecksProps {
   batch: GeneratedContent;
   /** Requested pages for a batch; the warning fires above this + PAGE_CEILING_MARGIN. */
@@ -104,9 +261,18 @@ interface BatchChecksProps {
   canFix: boolean;
   disabled: boolean;
   onFix: (instruction: string) => void;
+  onAddGreekSources: (selected: GreekSourceSuggestion[]) => void;
 }
 
-export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disabled, onFix }: BatchChecksProps) {
+export function BatchChecks({
+  batch,
+  targetPages,
+  showPageWarning,
+  canFix,
+  disabled,
+  onFix,
+  onAddGreekSources,
+}: BatchChecksProps) {
   const [expanded, setExpanded] = useState(false);
   const check = batch.bibliographyCheck;
   const flagged = check ? check.entries.filter(needsAttention) : [];
@@ -119,7 +285,10 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
   const warnings = batch.structureWarnings ?? [];
   const overLimit = showPageWarning && targetPages > 0 && batch.pageCount > targetPages + PAGE_CEILING_MARGIN;
 
-  if (!check && warnings.length === 0 && !overLimit) return null;
+  const greekSuggestions = batch.greekSuggestions;
+  const greekEntries = check ? check.entries.filter((e) => GREEK_LETTERS.test(e.text)).length : 0;
+
+  if (!check && warnings.length === 0 && !overLimit && !greekSuggestions && !batch.greekSourcesGiven) return null;
 
   const hasIssues = flagged.length > 0 || unrelated.length > 0 || uncited.length > 0 || orphans.length > 0;
 
@@ -173,7 +342,7 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
               {flagged.map((entry) => (
                 <div key={entry.text} className={styles.entry}>
                   <span className={styles.entryStatus}>{STATUS_LABELS[entry.status]}</span>
-                  <span className={styles.entryText}>{entry.text}</span>
+                  <span className={styles.entryText}>{withItalics(entry.text)}</span>
                 </div>
               ))}
               {unrelated.map((entry) => (
@@ -181,7 +350,7 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
                   <span className={styles.entryStatus}>
                     {entry.relevance_scope === 'topic' ? 'Εκτός θέματος ενότητας' : 'Δεν τεκμηριώνει το κείμενο'}
                   </span>
-                  <span className={styles.entryText}>{entry.text}</span>
+                  <span className={styles.entryText}>{withItalics(entry.text)}</span>
                   {entry.relevance_reason && (
                     <span className={styles.entryReason}>{entry.relevance_reason}</span>
                   )}
@@ -193,13 +362,13 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
               {uncited.map((text) => (
                 <div key={`unc-${text}`} className={styles.entry}>
                   <span className={styles.entryStatus}>Χωρίς παραπομπή στο κείμενο</span>
-                  <span className={styles.entryText}>{text}</span>
+                  <span className={styles.entryText}>{withItalics(text)}</span>
                 </div>
               ))}
               {corrected.filter((e) => !needsAttention(e)).map((entry) => (
                 <div key={entry.text} className={styles.entry}>
                   <span className={styles.entryStatusFixed}>{STATUS_LABELS[entry.status]}</span>
-                  <span className={styles.entryText}>{entry.text}</span>
+                  <span className={styles.entryText}>{withItalics(entry.text)}</span>
                 </div>
               ))}
               {orphans.length > 0 && (
@@ -221,6 +390,19 @@ export function BatchChecks({ batch, targetPages, showPageWarning, canFix, disab
             </div>
           )}
         </div>
+      )}
+
+      {(greekSuggestions || batch.greekSourcesGiven) && (
+        <GreekSources
+          suggestions={greekSuggestions}
+          given={batch.greekSourcesGiven}
+          content={batch.content}
+          greekEntries={greekEntries}
+          totalEntries={check?.summary.total ?? 0}
+          canAdd={canFix}
+          disabled={disabled}
+          onAdd={onAddGreekSources}
+        />
       )}
     </div>
   );

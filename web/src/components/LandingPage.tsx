@@ -465,7 +465,7 @@ export function LandingPage() {
                       onClick={() => setModelProvider('claude')}
                     >
                       <Cpu size={16} />
-                      Claude Opus 5
+                      Claude Opus 5.5
                     </button>
                     <button
                       className={`${styles.modeButton} ${modelProvider === 'openai' ? styles.modeButtonActive : ''}`}

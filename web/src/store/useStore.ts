@@ -41,6 +41,37 @@ export interface GeneratedContent {
   structureWarnings?: string[];
   /** CrossRef/OpenAlex verification of the batch's Βιβλιογραφία. */
   bibliographyCheck?: BibliographyCheck;
+  /** Greek sources (Κάλλιπος, ΕΚΤ) the user may add; undefined = search not run/failed. */
+  greekSuggestions?: GreekSourceSuggestion[];
+  /** Integration mode: verified Greek sources given to the model before it wrote this batch. */
+  greekSourcesGiven?: GreekSourceGiven[];
+}
+
+export interface GreekSourceGiven {
+  key: string;
+  kind: GreekSourceSuggestion['kind'];
+  title: string;
+  doi: string | null;
+  apa: string;
+  citation: string;
+}
+
+/** A verified Greek source proposed as an ADDITIONAL citation for one sentence. */
+export interface GreekSourceSuggestion {
+  key: string;
+  kind: 'kallipos' | 'journal' | 'conference' | 'doctoral';
+  title: string;
+  year: number;
+  venue: string;
+  doi: string | null;
+  /** Full APA entry added to the Βιβλιογραφία. */
+  apa: string;
+  /** In-text form, e.g. "Μέκος et al., 2016". */
+  citation: string;
+  /** Sentence the source supports; null when the text has no in-text citations. */
+  sentence: string | null;
+  section: string;
+  reason: string;
 }
 
 export type BibliographyEntryStatus =
@@ -125,6 +156,13 @@ export const DEFAULT_STRUCTURE_CONFIG: StructureConfig = {
 };
 
 /**
+ * Greek sources: 'suggest' = verified Greek sources are proposed after each
+ * batch and the user picks what to add; 'integrate' = they are also given to
+ * the model BEFORE it writes (useful for Greece-specific topics).
+ */
+export type GreekSourcesMode = 'suggest' | 'integrate';
+
+/**
  * A snapshot of an in-progress educational-material session.
  * Saved to localStorage so the user can resume after closing the tab,
  * losing connection, or starting another task in between.
@@ -148,6 +186,7 @@ export interface PendingTask {
   keywords: string;
   isEditDoc: boolean;
   structureConfig: StructureConfig;
+  greekSourcesMode?: GreekSourcesMode;
   generatedBatches: GeneratedContent[];
   approvedReferences: Reference[];
   skillReviews: Record<number, SkillCoverageReview>;
@@ -180,6 +219,7 @@ export interface AppState {
 
   // Optional structural elements to include in generated material (see type).
   structureConfig: StructureConfig;
+  greekSourcesMode: GreekSourcesMode;
 
   // Generation state
   selectedModule: number | null;
@@ -251,6 +291,7 @@ export interface AppState {
   setTotalModulePages: (pages: number) => void;
   setTargetPages: (pages: number) => void;
   setStructureConfig: (cfg: Partial<StructureConfig>) => void;
+  setGreekSourcesMode: (mode: GreekSourcesMode) => void;
   setModuleHours: (moduleNumber: number, hours: number) => void;
   setQueueStatus: (position: number, wait: number) => void;
   clearQueueStatus: () => void;
@@ -260,7 +301,7 @@ export interface AppState {
     content: string,
     references: Reference[],
     pageCount: number,
-    checks?: Pick<GeneratedContent, 'structureWarnings' | 'bibliographyCheck'>,
+    checks?: Pick<GeneratedContent, 'structureWarnings' | 'bibliographyCheck' | 'greekSuggestions' | 'greekSourcesGiven'>,
   ) => void;
   loadPendingTask: (id: string) => void;
   deletePendingTask: (id: string) => void;
@@ -279,6 +320,7 @@ const activeStateDefaults = {
   keywords: '',
   isEditDoc: false,
   structureConfig: DEFAULT_STRUCTURE_CONFIG,
+  greekSourcesMode: 'suggest' as GreekSourcesMode,
   selectedModule: null as number | null,
   currentBatch: 1,
   generatedBatches: [] as GeneratedContent[],
@@ -335,6 +377,7 @@ function snapshotTask(state: AppState, id: string, createdAt: number): PendingTa
     keywords: state.keywords,
     isEditDoc: state.isEditDoc,
     structureConfig: state.structureConfig,
+    greekSourcesMode: state.greekSourcesMode,
     generatedBatches: state.generatedBatches,
     approvedReferences: state.approvedReferences,
     skillReviews: state.skillReviews,
@@ -602,6 +645,8 @@ export const useStore = create<AppState>()(
         structureConfig: { ...state.structureConfig, ...cfg },
       })),
 
+      setGreekSourcesMode: (mode) => set({ greekSourcesMode: mode }),
+
       setModuleHours: (moduleNumber, hours) => set((state) => {
         const modules = state.modules.map((m) =>
           m.number === moduleNumber ? { ...m, hours } : m
@@ -629,6 +674,8 @@ export const useStore = create<AppState>()(
                   status: 'pending' as const,
                   structureWarnings: checks?.structureWarnings,
                   bibliographyCheck: checks?.bibliographyCheck,
+                  greekSuggestions: checks?.greekSuggestions,
+                  greekSourcesGiven: checks?.greekSourcesGiven,
                 }
               : batch
           ),
@@ -657,6 +704,7 @@ export const useStore = create<AppState>()(
           keywords: task.keywords,
           isEditDoc: task.isEditDoc ?? false,
           structureConfig: task.structureConfig ?? DEFAULT_STRUCTURE_CONFIG,
+          greekSourcesMode: task.greekSourcesMode ?? 'suggest',
           selectedModule: task.selectedModule ?? (task.modules[0]?.number ?? null),
           currentBatch: task.currentBatch,
           generatedBatches: task.generatedBatches,

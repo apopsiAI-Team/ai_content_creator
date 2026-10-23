@@ -18,7 +18,7 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import type { StructureConfig } from '../store/useStore';
+import type { GreekSourcesMode, GreekSourceSuggestion, StructureConfig } from '../store/useStore';
 
 // Optional structural elements the user can toggle off. The quality core and
 // the Βιβλιογραφία are always included and intentionally not listed here.
@@ -30,12 +30,27 @@ const STRUCTURE_ELEMENTS: { key: keyof StructureConfig; label: string; hint?: st
   { key: 'in_text_citations', label: 'Ενδοκειμενικές αναφορές', hint: 'Αν απενεργοποιηθούν, οι ισχυρισμοί δεν τεκμηριώνονται ατομικά με (Επώνυμο, Έτος). Η Βιβλιογραφία παραμένει.' },
 ];
 import { generateWithStreaming, generateSkillCoverageReview } from '../services/claudeService';
-import { exportGeneratedMaterialToPlatform, generateSummary } from '../services/api';
+import { applyGreekSources, exportGeneratedMaterialToPlatform, generateSummary, verifyBibliography } from '../services/api';
+import { estimatePages } from '../utils/pages';
 import { exportToWord } from '../utils/wordExport';
 import { SkillCoverageReview } from './SkillCoverageReview';
 import { BatchFeedbackDialog } from './BatchFeedbackDialog';
 import { BatchChecks } from './BatchChecks';
 import styles from './ContentGenerator.module.css';
+
+// Greek sources (Κάλλιπος, ΕΚΤ, Greek research bodies) — always verified records.
+const GREEK_SOURCE_MODES: { value: GreekSourcesMode; label: string; hint: string }[] = [
+  {
+    value: 'suggest',
+    label: 'Προτάσεις μετά από κάθε τμήμα',
+    hint: 'Μετά από κάθε τμήμα προτείνονται ελληνικές πηγές που ταιριάζουν στο κείμενο· εσείς επιλέγετε ποιες θα προστεθούν.',
+  },
+  {
+    value: 'integrate',
+    label: 'Ενσωμάτωση κατά τη συγγραφή',
+    hint: 'Επαληθευμένες ελληνικές πηγές δίνονται στο μοντέλο πριν γράψει, για να τις αξιοποιήσει όπου ταιριάζουν. Χρήσιμο για θέματα με ελληνικό αντικείμενο (π.χ. ελληνική αλιεία). Προσθέτει ~15 δευτ. ανά τμήμα.',
+  },
+];
 
 function ConfirmResetDialog({ isOpen, onConfirm, onCancel }: { isOpen: boolean; onConfirm: () => void; onCancel: () => void }) {
   if (!isOpen) return null;
@@ -73,6 +88,8 @@ export function ContentGenerator() {
     setTotalModulePages,
     structureConfig,
     setStructureConfig,
+    greekSourcesMode,
+    setGreekSourcesMode,
     generatedBatches,
     addGeneratedBatch,
     updateBatchStatus,
@@ -215,6 +232,8 @@ export function ContentGenerator() {
             status: 'pending',
             structureWarnings: result.structureWarnings,
             bibliographyCheck: result.bibliographyCheck,
+            greekSuggestions: result.greekSuggestions,
+            greekSourcesGiven: result.greekSourcesGiven,
           });
           setStreamingContent('');
         },
@@ -232,6 +251,7 @@ export function ContentGenerator() {
         null,
         structureConfig,
         totalModulePages,
+        greekSourcesMode,
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -264,6 +284,7 @@ export function ContentGenerator() {
     clearQueueStatus,
     modelProvider,
     structureConfig,
+    greekSourcesMode,
   ]);
 
   const handleApprove = useCallback(
@@ -412,6 +433,48 @@ export function ContentGenerator() {
     [selectedModule, module, moduleBatches, documentTitle, currentReview, updateBatchStatus, setProductionComplete, setModuleSummary, setIsGeneratingSummary, modelProvider, currentTaskId, totalModulePages]
   );
 
+  // Add the Greek sources the user picked: extra in-text citations + bibliography
+  // entries (no LLM call — nothing existing is replaced), then re-verify.
+  const addGreekSources = useCallback(async (batchNumber: number, selected: GreekSourceSuggestion[]) => {
+    const batch = moduleBatches.find((b) => b.batchNumber === batchNumber);
+    if (!module || !batch || selected.length === 0) return;
+
+    setIsGenerating(true);
+    try {
+      const result = await applyGreekSources(batch.content, selected, currentTaskId || '');
+      const check = await verifyBibliography(result.content, currentTaskId || '', module.title).catch((err) => {
+        console.error('Bibliography verification failed:', err);
+        return undefined;
+      });
+      const content = check?.changed ? check.content : result.content;
+      const applied = new Set(result.applied);
+      updateBatchContent(module.number, batchNumber, content, batch.references, estimatePages(content), {
+        structureWarnings: batch.structureWarnings,
+        bibliographyCheck: check
+          ? {
+              entries: check.entries,
+              orphan_citations: check.orphan_citations,
+              uncited_entries: check.uncited_entries ?? [],
+              summary: check.summary,
+            }
+          : batch.bibliographyCheck,
+        greekSuggestions: (batch.greekSuggestions ?? []).filter((s) => !applied.has(s.key)),
+        greekSourcesGiven: batch.greekSourcesGiven,
+      });
+      if (result.unplaced.length > 0) {
+        useStore.getState().setError(
+          `${result.unplaced.length} πηγή/ές δεν προστέθηκαν: η πρόταση στην οποία αντιστοιχούσαν δεν βρέθηκε πλέον στο κείμενο.`,
+        );
+      }
+    } catch (error) {
+      console.error('Adding Greek sources failed:', error);
+      const msg = error instanceof Error ? error.message : 'Σφάλμα κατά την προσθήκη πηγών';
+      useStore.getState().setError(msg);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [module, moduleBatches, currentTaskId, setIsGenerating, updateBatchContent]);
+
   const runRevision = useCallback(async (batchNumber: number, feedback: string) => {
     if (!module) return;
 
@@ -445,6 +508,9 @@ export function ContentGenerator() {
           updateBatchContent(module.number, batchNumber, result.content, result.references, result.pageCount, {
             structureWarnings: result.structureWarnings,
             bibliographyCheck: result.bibliographyCheck,
+            greekSuggestions: result.greekSuggestions,
+            // Revisions never re-run the integration — keep what the batch was given.
+            greekSourcesGiven: result.greekSourcesGiven ?? targetBatch?.greekSourcesGiven,
           });
           setStreamingContent('');
         },
@@ -462,6 +528,7 @@ export function ContentGenerator() {
         null,
         structureConfig,
         totalModulePages,
+        greekSourcesMode,
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -472,7 +539,7 @@ export function ContentGenerator() {
       setIsGenerating(false);
       clearQueueStatus();
     }
-  }, [module, moduleBatches, contentMode, approvedReferences, getApprovedContent, setIsGenerating, updateBatchContent, targetPages, totalModulePages, learningOutcomes, keywords, totalBatches, setQueueStatus, clearQueueStatus, modelProvider, currentTaskId, structureConfig]);
+  }, [module, moduleBatches, contentMode, approvedReferences, getApprovedContent, setIsGenerating, updateBatchContent, targetPages, totalModulePages, learningOutcomes, keywords, totalBatches, setQueueStatus, clearQueueStatus, modelProvider, currentTaskId, structureConfig, greekSourcesMode]);
 
   const handleFeedbackSubmit = useCallback((feedback: string) => {
     if (feedbackDialogBatch) runRevision(feedbackDialogBatch, feedback);
@@ -653,6 +720,7 @@ export function ContentGenerator() {
                   canFix={batch.status === 'pending'}
                   disabled={isGenerating}
                   onFix={(instruction) => runRevision(batch.batchNumber, instruction)}
+                  onAddGreekSources={(selected) => addGreekSources(batch.batchNumber, selected)}
                 />
 
                 {batch.status === 'pending' && (
@@ -790,6 +858,23 @@ export function ContentGenerator() {
                         <span>{label}{hint ? ' *' : ''}</span>
                       </label>
                     ))}
+                  </div>
+                  <span className={styles.structureTitle}>Ελληνικές πηγές</span>
+                  <div className={styles.greekModes}>
+                    {GREEK_SOURCE_MODES.map(({ value, label, hint }) => (
+                      <label key={value} className={styles.structureCheckbox} title={hint}>
+                        <input
+                          type="radio"
+                          name="greekSourcesMode"
+                          checked={greekSourcesMode === value}
+                          onChange={() => setGreekSourcesMode(value)}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                    <span className={styles.greekModeHint}>
+                      {GREEK_SOURCE_MODES.find((m) => m.value === greekSourcesMode)?.hint}
+                    </span>
                   </div>
                 </div>
 

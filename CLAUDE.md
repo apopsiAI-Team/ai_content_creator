@@ -70,9 +70,12 @@ The Landing Page exposes a tab bar with two distinct entry points:
 
 Only `experimental` is exposed in the UI (the "Κανονική"/`standard` Research Hub mode was retired — its bibliography was too thin in practice). The type still allows `'standard'` for compatibility, but the store always sets `'experimental'` and `claudeService` never requests the Research Hub.
 
-- `experimental` — Anti-hallucination prompt (`EXPERIMENTAL_SYSTEM_PROMPT` in `prompts/system_prompt.py`); the model cites real sources from its own knowledge (seminal works/textbooks → official reports → highly cited articles), DOI only when certain, theses forbidden, full APA bibliography mandatory.
-- **Bibliography verification** — after every batch the frontend calls `POST /api/verify-bibliography` (`services/citation_verifier.py`): each entry is checked against CrossRef → OpenAlex → Open Library (books), or its cited URL must resolve (reports). Wrong DOIs are corrected (same year ±1 only) or removed in the content; unverified entries, placeholders, theses and in-text citations without an entry are flagged on the batch card, with a one-click revision to replace them.
-- **Citation support** — existence is not enough, so the same endpoint also flags (a) bibliography entries never cited in the text (`uncited_entries`; only when the text uses in-text citations) and (b) real sources that do not support the sentences citing them: `services/citation_relevance.py` sends each cited entry's title + abstract (from CrossRef/OpenAlex) and its citing sentences to a small model (`settings.relevance_model_id`, Haiku 4.5) in one call per batch → `relevance` ∈ `supports | general | unrelated | uncertain`. Only `unrelated` is surfaced. It catches gross topic mismatches, not wrong page-level details (no full texts). When the text has **no** in-text citations (turned off) there are no sentence pairs, so `assess_topic_relevance` judges each entry against the module title (`topic` in the request) and the section headings instead (`relevance_scope: "topic"`, verdicts `related | unrelated | uncertain`); off-topic sources show as «Εκτός θέματος ενότητας».
+- `experimental` — Anti-hallucination prompt (`EXPERIMENTAL_SYSTEM_PROMPT` in `prompts/system_prompt.py`); the model cites real sources from its own knowledge (seminal works/textbooks → official reports → highly cited articles), DOI only when certain, undergraduate/master's theses forbidden (doctoral dissertations allowed), full APA bibliography mandatory.
+- **Bibliography verification** — after every batch the frontend calls `POST /api/verify-bibliography` (`services/citation_verifier.py`): each entry is checked against CrossRef (DOIs also at DataCite) → OpenAlex → Open Library (books), or its cited URL must resolve (reports). Wrong DOIs are corrected (same year ±1 only) or removed in the content; unverified entries, placeholders, theses and in-text citations without an entry are flagged on the batch card, with a one-click revision to replace them.
+- **Citation support** — existence is not enough, so the same endpoint also flags (a) bibliography entries never cited in the text (`uncited_entries`; only when the text uses in-text citations) and (b) real sources that do not support the sentences citing them: `services/citation_relevance.py` sends each cited entry's title + abstract (from CrossRef/OpenAlex) and its citing sentences to a small model (`settings.relevance_model_id`, Haiku 5.5) in one call per batch → `relevance` ∈ `supports | general | unrelated | uncertain`. Only `unrelated` is surfaced. It catches gross topic mismatches, not wrong page-level details (no full texts). When the text has **no** in-text citations (turned off) there are no sentence pairs, so `assess_topic_relevance` judges each entry against the module title (`topic` in the request) and the section headings instead (`relevance_scope: "topic"`, verdicts `related | unrelated | uncertain`); off-topic sources show as «Εκτός θέματος ενότητας».
+
+- **Greek sources** — the model rarely cites Greek works, so after every batch (in parallel with the verification) the frontend calls `POST /api/greek-sources/suggest` (`services/greek_sources.py`): it searches Κάλλιπος (open textbooks, DataCite prefix 10.57713, whole catalogue cached 24h and ranked locally), ΕΚΤ journals/proceedings/PhD theses (CrossRef prefix 10.12681; PhDs only from the ΕΚΤ archive `10.12681/eadd`) and Greek-language journal articles in OpenAlex (institutional repositories excluded — they mix diploma/master theses with PhDs). Haiku keeps only candidates that directly support a quoted sentence (or the topic, without in-text citations). The batch card lists them («Ελληνικές πηγές: X/Y στη βιβλιογραφία · N προτεινόμενες»); the user ticks what to add and `POST /api/greek-sources/apply` **adds** an in-text citation next to the existing one ("(Smith, 2020; Μέκος, 2016)") plus the APA entry — no LLM call, nothing replaced — then the bibliography is re-verified. Κάλλιπος author names are Latin transliterations (as registered at DataCite). "Greek source" = Greek publisher/journal **or** Greek research body, in any language: Haiku first writes targeted Greek + English queries; English queries search ΕΚΤ journals (e.g. Mediterranean Marine Science) and OpenAlex articles whose **first author** is at a Greek institution. Country words ("ελληνικός", "Greek") never count as a match.
+- **Greek sources — integration mode** (`greekSourcesMode: 'integrate'`, selector «Ελληνικές πηγές» on the generation screen; default `'suggest'`): before a batch is written, `prepare_integration_sources` finds up to 8 verified Greek sources for the module (topic, learning outcomes, keywords, ESCO skills; ones already cited in earlier batches skipped) and `build_integration_block` adds them to the prompt as **optional, additional** sources — cite only for what the title/abstract supports, never instead of a stronger source, use the given citation/APA verbatim. Adds ~15 s per batch; emits SSE `{type:'greek_sources', count, data}` (the sources given), stored on the batch as `greekSourcesGiven` and shown on the card as «δόθηκαν στο μοντέλο N, χρησιμοποιήθηκαν M» (used = DOI or title found in the batch). Revisions never use it. The usual verification + relevance check run afterwards, and the after-batch suggestions still appear.
 
 `userInstructions` is an independent free-text steer, entered on the generation screen ("Προσθήκη οδηγιών" in `ContentGenerator`, stored in `useStore`); it applies to every following batch until the user edits or clears it. The Landing Page and ESCO module list no longer have their own instructions box.
 
@@ -82,7 +85,7 @@ Optional elements are **on demand**: `activities`, `self_assessment`, `glossary`
 
 ### End-to-end content flow
 
-1. Frontend posts to `POST /api/generate-stream` with the module dict, `experimental_mode`, `target_pages`, `learning_outcomes`, `keywords`, `previous_content`, `batch_number`, `total_batches`, optional `user_instructions`.
+1. Frontend posts to `POST /api/generate-stream` with the module dict, `experimental_mode`, `target_pages`, `learning_outcomes`, `keywords`, `previous_content`, `batch_number`, `total_batches`, optional `user_instructions`, `greek_sources_mode` (`suggest` | `integrate`).
 2. Backend (`generate.py` → `claude_service.generate_content_stream`):
    - Emits `{type: 'references', data: [...]}` first (empty — the Research Hub path is no longer used by the UI)
    - May emit a `{type: 'queue', position, estimated_wait}` event if the rate limiter is saturated
@@ -97,19 +100,20 @@ Optional elements are **on demand**: `activities`, `self_assessment`, `glossary`
 
 ### Backend layout (`backend_py/src/edu_backend/`)
 - `main.py` — FastAPI app, CORS allowlist (5173 / 4173 only), startup banner, Rust hub health probe, rate-limit status endpoint
-- `config.py` — `Settings` (pydantic): **`model_id = "claude-opus-5"`**, `max_tokens = 64000`, `anthropic_tier = 2`, `rust_research_hub_url = http://localhost:8091`
+- `config.py` — `Settings` (pydantic): **`model_id = "claude-opus-5-5"`**, `max_tokens = 64000`, `anthropic_tier = 2`, `rust_research_hub_url = http://localhost:8091`
 - `rate_limiter.py` — Semaphore-based concurrency control + sliding-window token tracker; tier-aware (2/3/4); `Priority.HEAVY` (content gen) vs `Priority.LIGHT` (summary/bibliography/review); per-user caps; emits queue position to frontend
 - `services/claude_service.py` — All Anthropic calls. Prompts cached via `cache_control: ephemeral` (90% cost reduction, ~5 min TTL). Stream retries with exponential backoff + jitter for 429/5xx/overload.
 - `services/research_service.py` — CrossRef + Rust hub queries; thesis/dissertation filtering; English keyword translation for Greek-language queries
 - `services/citation_verifier.py` — Bibliography verification (CrossRef / OpenAlex / Open Library / URL check), DOI correction, orphan/uncited-citation detection
 - `services/citation_relevance.py` — Small-model check that each cited source supports its citing sentences
+- `services/greek_sources.py` — Greek source suggestions (Κάλλιπος / ΕΚΤ / OpenAlex el) + additive insertion
 - `prompts/structure.py` — `StructureConfig`, prompt stripping + manifest for disabled elements, `detect_structure_violations`
 - `services/esco_service.py` — Loads `data/skills_compact.json` (preprocessed Greek ESCO skills); name lookup + partial search
 - `prompts/system_prompt.py` — `SYSTEM_PROMPT`, `OUTLINE_PROMPT`, `EXPAND_PROMPT`, `CITATIONS_PROMPT`, `REVIEW_PROMPT`, `STANDARD_CONTENT_STRUCTURE`
 - `routers/`:
   - `health.py` — `GET /api/health`
   - `esco.py` — `GET /api/esco/skills`, `GET /api/esco/search`
-  - `generate.py` — `POST /api/generate` (multipass), `POST /api/generate-stream`, `POST /api/generate-summary`, `POST /api/generate-bibliography`, `POST /api/verify-bibliography`, `POST /api/review`, `GET /api/research/search`
+  - `generate.py` — `POST /api/generate` (multipass), `POST /api/generate-stream`, `POST /api/generate-summary`, `POST /api/generate-bibliography`, `POST /api/verify-bibliography`, `POST /api/greek-sources/suggest`, `POST /api/greek-sources/apply`, `POST /api/review`, `GET /api/research/search`
   - `claude.py` — Generic `POST /api/claude/generate` and `/api/claude/generate-stream` proxies (used by the frontend's ESCO skill-review JSON call)
 
 ### Web app key files
@@ -152,14 +156,14 @@ VITE_API_URL=http://localhost:8000   # default: same-origin
 
 ## Content Generation Notes
 
-- **Model:** `claude-opus-5` (set in `backend_py/.../config.py`). Streaming via `client.messages.stream`; non-stream paths use `client.messages.create`.
+- **Model:** `claude-opus-5-5` (set in `backend_py/.../config.py`). Streaming via `client.messages.stream`; non-stream paths use `client.messages.create`.
 - **Prompt caching:** every system prompt is wrapped via `_cacheable_system()` with `cache_control: {"type": "ephemeral"}`.
 - **Per-batch sections:** Σκοπός → Προσδοκώμενα → Λέξεις Κλειδιά → (Εισαγωγή only batch 1) → Υποενότητες → [MCQs] → Βιβλιογραφία → [Γλωσσάρι] (bracketed = only when enabled in `structureConfig`).
 - **Dynamic MCQ count** (only when `self_assessment` is ON): 20 total per module, distributed proportionally across batches (`per_batch = max(5, 20 // total_batches + ...)`), capped so MCQs take ≤ ~25% of the batch's pages (`floor(target × 0.25 / 0.18)`).
 - **Continuation between batches:** for batch > 1, the previous content's headings + last 3000 chars are injected with explicit "ΣΥΝΕΧΙΣΕ ΑΠΟ ΕΔΩ" + "ΜΗΝ επαναλάβεις" guards.
 - **Page sizing:** one page = `chars_per_page` = **2000 chars** (what fits on a page of the exported .docx: Calibri 12pt, 1.5 spacing). Keep `settings.chars_per_page` and `CHARS_PER_PAGE` (`web/src/utils/pages.ts`) in sync. The page target covers the **whole batch** (body + MCQs + bibliography + glossary): `page_budget()` subtracts the enabled end sections and the prompt states body pages, word count, subsection count, and a hard ceiling of `target_pages + 5`. MCQs are capped at ~25% of a batch's pages. The last batch requests only the remaining pages (min 1) and also reserves room for the module summary. The cover page and table of contents of the Word export are not counted.
 - **Greek language throughout**, APA 7th, **parenthetical citations only** (the system prompt forbids "Σύμφωνα με τον X..." and forces "et al.", never "κ.ά.").
-- **Forbidden source types:** undergraduate / master's / doctoral theses are filtered out both by the prompt and by `research_service._filter_theses`.
+- **Forbidden source types:** undergraduate / master's theses (πτυχιακές, διπλωματικές, μεταπτυχιακές) — forbidden by the prompt, filtered by `research_service._filter_theses` and flagged by the verifier (`THESIS_KEYWORDS`). **Doctoral dissertations are allowed.**
 
 ## ESCO Integration
 

@@ -1,8 +1,9 @@
-import type { BibliographyCheck, Module, Reference, SkillCoverageReview, StructureConfig } from '../store/useStore';
+import type { BibliographyCheck, GreekSourceGiven, GreekSourceSuggestion, GreekSourcesMode, Module, Reference, SkillCoverageReview, StructureConfig } from '../store/useStore';
 import {
   generateEducationalContentStream,
   generateBibliography,
   reviewSkillCoverage,
+  suggestGreekSources,
   verifyBibliography,
   type Occupation,
 } from './api';
@@ -16,6 +17,10 @@ interface GenerationResult {
   structureWarnings: string[];
   /** Undefined when the verification service could not be reached. */
   bibliographyCheck?: BibliographyCheck;
+  /** Greek sources the user may add; undefined when the search failed. */
+  greekSuggestions?: GreekSourceSuggestion[];
+  /** Integration mode: Greek sources given to the model; undefined when not used. */
+  greekSourcesGiven?: GreekSourceGiven[];
 }
 
 function extractReferencesFromContent(content: string): Reference[] {
@@ -137,10 +142,13 @@ export async function generateWithStreaming(
   structureConfig?: StructureConfig,
   /** Requested pages for the whole module — sizes the summary reserved in the last batch. */
   totalPages?: number,
+  /** 'integrate' also gives verified Greek sources to the model before it writes. */
+  greekSourcesMode: GreekSourcesMode = 'suggest',
 ): Promise<void> {
   let fullContent = '';
   let researchRefs: Reference[] = [];
   let structureWarnings: string[] = [];
+  let greekSourcesGiven: GreekSourceGiven[] | undefined;
 
   const isExperimental = contentMode === 'experimental';
   const isRevision = mode === 'revision';
@@ -195,6 +203,8 @@ export async function generateWithStreaming(
     structureConfig,
     (keys) => { structureWarnings = keys; },
     totalPages,
+    greekSourcesMode,
+    (sources) => { greekSourcesGiven = sources; },
   );
 
   // Check if bibliography section exists in the generated content
@@ -219,6 +229,11 @@ export async function generateWithStreaming(
 
   // Verify the bibliography against CrossRef/OpenAlex. Wrong DOIs come back
   // corrected/removed; everything else is only flagged for the user.
+  // The Greek-sources search runs alongside: it only proposes additions.
+  const greekSearch = suggestGreekSources(fullContent, module.title, documentId).catch((err) => {
+    console.error('Greek sources search failed:', err);
+    return undefined;
+  });
   let bibliographyCheck: BibliographyCheck | undefined;
   try {
     const check = await verifyBibliography(fullContent, documentId, module.title);
@@ -233,12 +248,16 @@ export async function generateWithStreaming(
     console.error('Bibliography verification failed:', err);
   }
 
+  const greekSuggestions = await greekSearch;
+
   onComplete({
     content: fullContent,
     references: researchRefs.length > 0 ? researchRefs : extractReferencesFromContent(fullContent),
     pageCount: estimatePages(fullContent),
     structureWarnings,
     bibliographyCheck,
+    greekSuggestions,
+    greekSourcesGiven,
   });
 }
 

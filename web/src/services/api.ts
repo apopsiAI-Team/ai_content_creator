@@ -1,4 +1,4 @@
-import type { BibliographyCheck, StructureConfig } from '../store/useStore';
+import type { BibliographyCheck, GreekSourceGiven, GreekSourceSuggestion, GreekSourcesMode, StructureConfig } from '../store/useStore';
 
 // Backend API service - Python FastAPI backend.
 // Default to same-origin (/api) so Cloudflare tunnels work without CORS issues.
@@ -269,6 +269,8 @@ export async function generateEducationalContentStream(
   structureConfig?: StructureConfig,
   onStructureWarnings?: (keys: string[]) => void,
   totalPages?: number,
+  greekSourcesMode: GreekSourcesMode = 'suggest',
+  onGreekSources?: (sources: GreekSourceGiven[]) => void,
 ): Promise<void> {
   const response = await fetch(apiUrl('/api/generate-stream'), {
     method: 'POST',
@@ -294,6 +296,7 @@ export async function generateEducationalContentStream(
       occupation,
       ...(structureConfig ? { structure_config: structureConfig } : {}),
       total_pages: totalPages || null,
+      greek_sources_mode: greekSourcesMode,
     }),
   });
 
@@ -316,6 +319,8 @@ export async function generateEducationalContentStream(
       onQueue(data.position as number, data.estimated_wait as number);
     } else if (data.type === 'structure_warnings' && onStructureWarnings && Array.isArray(data.data)) {
       onStructureWarnings(data.data as string[]);
+    } else if (data.type === 'greek_sources' && onGreekSources && Array.isArray(data.data)) {
+      onGreekSources(data.data as GreekSourceGiven[]);
     }
   };
 
@@ -347,6 +352,44 @@ export async function verifyBibliography(
     method: 'POST',
     headers: apiHeaders(),
     body: JSON.stringify({ content, document_id: documentId, topic }),
+  });
+
+  if (!response.ok) {
+    throw await apiError(response);
+  }
+
+  return response.json();
+}
+
+// Search Κάλλιπος / ΕΚΤ for Greek sources that support the batch (suggestions only).
+export async function suggestGreekSources(
+  content: string,
+  topic = '',
+  documentId = '',
+): Promise<GreekSourceSuggestion[]> {
+  const response = await fetch(apiUrl('/api/greek-sources/suggest'), {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify({ content, topic, document_id: documentId }),
+  });
+
+  if (!response.ok) {
+    throw await apiError(response);
+  }
+
+  return (await response.json()).suggestions;
+}
+
+// Add the selected Greek sources: an extra in-text citation + a bibliography entry.
+export async function applyGreekSources(
+  content: string,
+  suggestions: GreekSourceSuggestion[],
+  documentId = '',
+): Promise<{ content: string; applied: string[]; unplaced: string[] }> {
+  const response = await fetch(apiUrl('/api/greek-sources/apply'), {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify({ content, suggestions, document_id: documentId }),
   });
 
   if (!response.ok) {

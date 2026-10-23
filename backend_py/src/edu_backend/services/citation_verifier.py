@@ -1,6 +1,7 @@
 """
 Citation Verifier — checks LLM-written bibliography entries against
 CrossRef, OpenAlex and Open Library (books), plus a URL check for reports.
+DOIs are resolved at CrossRef, else DataCite (e.g. Κάλλιπος books).
 
 The model writes references from its own knowledge ("Πειραματική" mode), so
 every entry of the generated "## Βιβλιογραφία" is checked after generation:
@@ -337,6 +338,39 @@ async def _crossref_by_doi(client: httpx.AsyncClient, doi: str) -> Optional[_Can
     return _crossref_candidate(resp.json().get("message", {}))
 
 
+def _datacite_candidates(attrs: dict) -> list[_Candidate]:
+    """DataCite registers the DOIs of Κάλλιπος (10.57713) and other Greek
+    repositories. Records carry the title in several languages — one
+    candidate per title, so a Greek entry matches the Greek title."""
+    authors = [c.get("familyName") or c.get("name") or "" for c in attrs.get("creators", [])]
+    abstracts = [d for d in attrs.get("descriptions", []) if d.get("descriptionType") == "Abstract"]
+    abstract = next((d["description"] for d in abstracts if d.get("lang") == "el"),
+                    abstracts[0]["description"] if abstracts else "")
+    return [
+        _Candidate(
+            title=t.get("title", ""),
+            authors=authors,
+            year=attrs.get("publicationYear"),
+            doi=attrs.get("doi"),
+            container=attrs.get("publisher") or "",
+            source="datacite",
+            abstract=_strip_markup(abstract)[:_ABSTRACT_MAX_CHARS],
+        )
+        for t in attrs.get("titles", []) if t.get("title")
+    ]
+
+
+async def _doi_candidates(client: httpx.AsyncClient, doi: str) -> list[_Candidate]:
+    """Resolve a DOI at its registration agency: CrossRef, else DataCite."""
+    by_crossref = await _crossref_by_doi(client, doi)
+    if by_crossref:
+        return [by_crossref]
+    resp = await client.get(f"https://api.datacite.org/dois/{doi}", headers=_headers())
+    if resp.status_code != 200:
+        return []
+    return _datacite_candidates(resp.json().get("data", {}).get("attributes", {}))
+
+
 async def _crossref_search(client: httpx.AsyncClient, entry: BibEntry) -> list[_Candidate]:
     query = entry.text
     if entry.doi:
@@ -441,8 +475,10 @@ async def verify_entry(
         async with semaphore or asyncio.Semaphore(1):
             doi_ok = False
             if entry.doi:
-                by_doi = await _crossref_by_doi(client, entry.doi)
-                if by_doi and _matches(entry, by_doi):
+                by_doi = next(
+                    (c for c in await _doi_candidates(client, entry.doi) if _matches(entry, c)), None
+                )
+                if by_doi:
                     doi_ok = True
                     result = _result(entry, "verified", True, by_doi)
                     if _is_thesis(by_doi.title, by_doi.container):
@@ -467,6 +503,9 @@ async def verify_entry(
                     result = _result(entry, "doi_invalid" if entry.doi else "unverified", False)
                 elif _is_thesis(match.title, match.container):
                     result = _result(entry, "thesis", False, match)
+                elif entry.doi and match.doi and match.doi.lower() == entry.doi.lower():
+                    # The DOI's agency was unreachable, but a search found the same DOI.
+                    result = _result(entry, "verified", True, match)
                 elif (entry.doi and match.doi and match.doi.lower() != entry.doi.lower()
                       and _same_edition(entry, match)):
                     result = _result(entry, "doi_corrected", True, match, suggested_doi=match.doi)
