@@ -126,3 +126,16 @@ def test_full_name_in_text_matches_acronym_entry():
     cited = cv._name_aliases("International Energy Agency")
     entry = cv._parse_entry("IEA. (2017). *Digitalization and energy*. IEA Publications.")
     assert cv._names_match(cited, entry.aliases)
+
+
+def test_short_main_title_without_subtitle_matches():
+    """Open Library lists "Marketing 4.0" without its subtitle."""
+    entry = cv._parse_entry(
+        "Kotler, P., Kartajaya, H., & Setiawan, I. (2017). Marketing 4.0: Moving from traditional to digital. Wiley."
+    )
+    def cand(title, authors=("Philip Kotler",)):
+        return cv._Candidate(title=title, authors=list(authors), year=2016, doi=None, container="", source="openlibrary")
+    assert cv._matches(entry, cand("Marketing 4.0"))
+    assert not cv._matches(entry, cand("Marketing 3.0"))                       # different book
+    assert not cv._matches(entry, cand("Marketing 4.0", authors=("Someone Else",)))  # author must match
+    assert not cv._matches(entry, cand("Marketing 4.0: A completely different subtitle here"))

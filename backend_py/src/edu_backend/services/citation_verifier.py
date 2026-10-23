@@ -311,8 +311,24 @@ def _openalex_candidate(item: dict) -> _Candidate:
     )
 
 
+def _main_title(title: str) -> str:
+    """Title without its subtitle ("Marketing 4.0: Moving from…" → "marketing 4 0")."""
+    return _norm(re.split(r"\s*[:—–]\s+|\s+-\s+", title, maxsplit=1)[0])
+
+
+def _same_main_title(a: str, b: str) -> bool:
+    """One side has a subtitle the other lacks, and the main titles are identical.
+    Short main titles ("Marketing 4.0") fall outside _title_similarity's
+    prefix tolerance; exact equality keeps "Marketing 3.0" ≠ "Marketing 4.0"."""
+    main_a, main_b = _main_title(a), _main_title(b)
+    if not main_a or main_a != main_b:
+        return False
+    return _norm(a) == main_a or _norm(b) == main_b
+
+
 def _matches(entry: BibEntry, cand: _Candidate) -> bool:
-    if _title_similarity(entry.title, cand.title) < TITLE_MATCH_THRESHOLD:
+    if (_title_similarity(entry.title, cand.title) < TITLE_MATCH_THRESHOLD
+            and not _same_main_title(entry.title, cand.title)):
         return False
     # Books are often indexed under a later edition/reprint — the year is not
     # required to match, only title + first author (or organisation).
